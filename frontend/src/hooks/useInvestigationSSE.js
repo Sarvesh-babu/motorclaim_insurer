@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import api from '../utils/api'
 
 export function useInvestigationSSE(claimId, onDone) {
@@ -6,6 +6,20 @@ export function useInvestigationSSE(claimId, onDone) {
   const [liveAgents, setLiveAgents] = useState({})
   const [investigating, setInvestigating] = useState(false)
   const esRef = useRef(null)
+
+  // Reset on claim switch (and on unmount): close any open stream and clear
+  // stale agent results so one claim's live findings never bleed into another.
+  useEffect(() => {
+    setAgentStatuses({})
+    setLiveAgents({})
+    setInvestigating(false)
+    return () => {
+      if (esRef.current) {
+        esRef.current.close()
+        esRef.current = null
+      }
+    }
+  }, [claimId])
 
   const start = useCallback(async () => {
     if (esRef.current) esRef.current.close()

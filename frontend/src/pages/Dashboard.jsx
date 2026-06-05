@@ -116,6 +116,16 @@ export default function Dashboard() {
   }, [claimId])
 
   useEffect(() => {
+    // Clean slate for each claim — prevents a previously-viewed claim's photos,
+    // result or docs from lingering when switching between claims.
+    setLoading(true)
+    setApiError('')
+    setClaim(null)
+    setResult(null)
+    setPolicy(null)
+    setImageUrls([])
+    setClaimDocs(undefined)
+
     Promise.all([
       api.get(`/claims/${claimId}`),
       api.get(`/claims/${claimId}/images`).catch(() => ({ data: { images: [] } })),

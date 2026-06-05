@@ -2,212 +2,345 @@
   "claim_id": "CLM-2026-06-000003",
   "agents": {
     "damage_assessment": {
-      "damaged_parts": [],
-      "overall_severity": "Minor",
+      "damage_present": true,
+      "no_damage_reason": null,
+      "damaged_parts": [
+        {
+          "part": "front_bumper",
+          "severity": "Severe",
+          "confidence": "High",
+          "visible_evidence": "crushed and deformed",
+          "bounding_box": {
+            "image_index": 1,
+            "x": 10.0,
+            "y": 40.0,
+            "w": 40.0,
+            "h": 30.0
+          },
+          "repair_type": "Replace",
+          "repair_estimate_INR": {
+            "min": 18600,
+            "max": 29800
+          },
+          "pricing_source": "segment_catalog"
+        },
+        {
+          "part": "bonnet",
+          "severity": "Severe",
+          "confidence": "High",
+          "visible_evidence": "crushed and deformed",
+          "bounding_box": {
+            "image_index": 1,
+            "x": 20.0,
+            "y": 20.0,
+            "w": 60.0,
+            "h": 40.0
+          },
+          "repair_type": "Replace",
+          "repair_estimate_INR": {
+            "min": 39400,
+            "max": 65000
+          },
+          "pricing_source": "segment_catalog"
+        },
+        {
+          "part": "headlight_left",
+          "severity": "Severe",
+          "confidence": "High",
+          "visible_evidence": "broken and deformed",
+          "bounding_box": {
+            "image_index": 1,
+            "x": 15.0,
+            "y": 30.0,
+            "w": 20.0,
+            "h": 25.0
+          },
+          "repair_type": "Replace",
+          "repair_estimate_INR": {
+            "min": 14700,
+            "max": 30700
+          },
+          "pricing_source": "segment_catalog"
+        },
+        {
+          "part": "headlight_right",
+          "severity": "Severe",
+          "confidence": "High",
+          "visible_evidence": "broken and deformed",
+          "bounding_box": {
+            "image_index": 1,
+            "x": 65.0,
+            "y": 30.0,
+            "w": 20.0,
+            "h": 25.0
+          },
+          "repair_type": "Replace",
+          "repair_estimate_INR": {
+            "min": 14700,
+            "max": 30700
+          },
+          "pricing_source": "segment_catalog"
+        },
+        {
+          "part": "fender_left",
+          "severity": "Severe",
+          "confidence": "High",
+          "visible_evidence": "crushed and deformed",
+          "bounding_box": {
+            "image_index": 1,
+            "x": 10.0,
+            "y": 45.0,
+            "w": 25.0,
+            "h": 35.0
+          },
+          "repair_type": "Replace",
+          "repair_estimate_INR": {
+            "min": 20800,
+            "max": 31400
+          },
+          "pricing_source": "segment_catalog"
+        },
+        {
+          "part": "radiator_grille",
+          "severity": "Severe",
+          "confidence": "High",
+          "visible_evidence": "crushed and deformed",
+          "bounding_box": {
+            "image_index": 1,
+            "x": 25.0,
+            "y": 35.0,
+            "w": 30.0,
+            "h": 20.0
+          },
+          "repair_type": "Replace",
+          "repair_estimate_INR": {
+            "min": 10600,
+            "max": 18600
+          },
+          "pricing_source": "segment_catalog"
+        }
+      ],
+      "overall_severity": "Severe",
       "total_repair_estimate": {
-        "min": 0,
-        "max": 0
+        "min": 118800,
+        "max": 206200
       },
-      "consistent_with_description": "Low",
-      "notes": "No visible damage observed. The vehicle appears to be in good condition.",
+      "consistent_with_description": "High",
+      "notes": "The vehicle appears to be a BMW 3 Series 320d, matching the policy details.",
       "vehicle_match_in_image": "Yes",
-      "vehicle_seen_description": "Tata Altroz XZ Plus, black color",
+      "vehicle_seen_description": "BMW 3 Series 320d, black in color",
       "registration_plate_visible": true,
       "plate_text_in_image": "DL12CU7624",
       "pre_existing_damage_observed": false,
       "pre_existing_damage_notes": null,
       "multiple_vehicles_in_frame": true,
       "image_quality_flags": [
-        "none"
+        "partial_view",
+        "blurry"
       ],
       "status": "completed",
-      "summary": "Severity: Minor | Est. Repair: ₹0–₹0 | Parts: 0 damaged | Vehicle Match: Yes",
-      "vehicle_segment": "Hatchback",
+      "summary": "Severity: Severe | Est. Repair: ₹85,000–₹120,000 | Parts: 6 damaged | Vehicle Match: Yes",
+      "vehicle_segment": "Luxury",
       "pricing_method": "segment_catalog",
-      "pricing_sources": [],
+      "pricing_sources": [
+        "segment_catalog"
+      ],
       "garage_estimate_provided": true,
-      "garage_estimate_amount_inr": 8000.0,
-      "garage_vs_ai_variance_pct": null,
+      "garage_estimate_amount_inr": 40000.0,
+      "garage_vs_ai_variance_pct": -75.4,
       "garage_inflation_flag": false,
-      "garage_inflation_note": null,
+      "garage_inflation_note": "Garage estimate ₹40,000 is 75% lower than AI mid-estimate ₹162,500",
       "image_quality": {
-        "photo_count": 1,
+        "photo_count": 2,
         "plate_visible": true,
         "issues": [
-          "Only 1 photo provided — at least 2 angles recommended"
+          "Damage only partially visible in frame",
+          "Photos appear blurry"
         ],
-        "gate_passed": true,
-        "resubmit_recommended": false
+        "gate_passed": false,
+        "resubmit_recommended": true
       }
     },
     "fraud_intelligence": {
-      "fraud_score": 40,
-      "fraud_label": "Medium",
+      "fraud_score": 92,
+      "fraud_label": "High",
       "indicators": [
-        "Multiple vehicles visible in claim images — possible staged collision scenario (FS-002)"
+        "Symmetrical Damage Anomaly (Medium)",
+        "Physics Mismatch (High)",
+        "Plate mismatch",
+        "Garage estimate underdeclaration"
       ],
-      "matched_schemes": [],
+      "matched_schemes": [
+        "New Policy Pre-Existing Damage Fraud (FS-001)"
+      ],
       "kb_references": [
-        "FS-002"
+        "FS-001",
+        "Symmetrical Damage Anomaly",
+        "Physics Mismatch"
       ],
-      "policy_age_days": 824,
+      "policy_age_days": 1108,
       "nps_risk_level": "None",
       "status": "completed",
-      "summary": "Fraud Risk: 40% (Medium) | Top flag: Multiple vehicles visible in claim images — possible staged collision scenario (FS-002)"
+      "summary": "Fraud Risk: 92% (High) | Top flag: NEW POLICY SYNDROME (HIGH RISK)"
     },
     "incident_reconstruction": {
       "collision_type": "Front impact",
-      "impact_direction": "Frontal impact, likely from opposite direction",
-      "reconstruction": "The vehicle was likely struck head-on by another vehicle that was on the wrong side of the road. The impact appears to have been at a relatively low speed, given the minor scratches reported. The damage is consistent with a frontal collision, but the exact extent of the damage is not provided.",
+      "impact_direction": "Head-on collision from the front, likely from an oncoming vehicle",
+      "reconstruction": "The vehicle was likely hit head-on by an oncoming vehicle, causing severe damage to the front end, including the bumper, bonnet, and headlights.",
       "reconstruction_bullets": [
-        "The claimant reported being hit by a car on the wrong side, which suggests a head-on or frontal impact.",
-        "The vehicle's front end, particularly the bumper and possibly the bonnet, show signs of damage consistent with a frontal collision.",
-        "The lack of extensive damage suggests the impact speed was relatively low."
+        "The damage pattern shows severe impact to the front of the vehicle, with multiple components damaged, including the front bumper, bonnet, and both headlights.",
+        "The claimant's story of being hit by an overspeeding vehicle from the wrong side is consistent with the damage pattern, which indicates a head-on collision.",
+        "The extent of the damage suggests a high-speed impact, which aligns with the claimant's description of the other vehicle being overspeeding."
       ],
       "storyboard_panels": [
         {
           "panel": 1,
           "title": "Pre-Incident",
           "emoji": "🚗",
-          "description": "The Tata Altroz XZ Plus was driving on the correct side of the road when suddenly a vehicle on the wrong side collided with it."
+          "description": "The vehicle was being driven on the road when an oncoming vehicle approached from the opposite direction."
         },
         {
           "panel": 2,
           "title": "Point of Impact",
           "emoji": "💥",
-          "description": "The vehicle on the wrong side hit the Tata Altroz head-on, causing minor scratches and damage to the front end."
+          "description": "The oncoming vehicle collided head-on with the claimant's vehicle, causing severe damage to the front end."
         },
         {
           "panel": 3,
           "title": "Immediate Aftermath",
           "emoji": "🔧",
-          "description": "The driver assessed the damage and reported minor scratches, likely to the front bumper and possibly other frontal components."
+          "description": "The claimant's vehicle came to a stop, with significant damage to the front end, while the other vehicle may have stopped or fled the scene."
         },
         {
           "panel": 4,
           "title": "Evidence Summary",
           "emoji": "🔍",
-          "description": "The physical evidence, although not extensively detailed, supports a frontal impact scenario, consistent with the claimant's story of being hit by a vehicle on the wrong side."
+          "description": "The physical evidence from the damage pattern and claimant's story suggest a high-speed head-on collision, consistent with the claimant's account."
         }
       ],
       "damage_matches_story": true,
-      "confidence": 70,
+      "confidence": 80,
       "similar_historical_cases": [
-        "HIST-012"
+        "HIST-003"
       ],
       "inconsistencies": [],
       "status": "completed",
-      "summary": "Most Probable: Front impact | Confidence: 70% | Story Match: Yes"
+      "summary": "Most Probable: Front impact | Confidence: 80% | Story Match: Yes"
     },
     "context_verification": {
       "status": "completed",
       "location_verified": true,
-      "geocoded_location": "Zone 14 Perungudi, Chennai Corporation, Sholinganallur, Chennai, Tamil Nadu, India",
+      "geocoded_location": "Jaipur, Jaipur Municipal Corporation, Jaipur Tehsil, Jaipur, Rajasthan, 302001, India",
       "coordinates": {
-        "lat": 12.9710239,
-        "lon": 80.2418051
+        "lat": 26.9154576,
+        "lon": 75.8189817
       },
-      "weather": "Overcast Clouds, 38.43°C, Humidity: 49%, Visibility: 10000m",
+      "weather": "Few Clouds, 38.06°C, Humidity: 26%, Visibility: 8938m",
       "traffic": "Moderate",
-      "policy_coverage_note": "No obvious coverage exclusions detected from policy document",
-      "policy_document_excerpt": "— POLICY DOCUMENT — POL-221144]\n145\nCOVERAGE DETAILS & CONDITIONS\n  OWN DAMAGE COVERAGE (Section I)\nAccidental Damage\nUp to IDV (Rs. 1,600,000) after deductibles\nFire and Exp\n  THIRD PARTY LIABILITY (Section II - Mandatory)\nThird Party Bodily Injury\nUnlimited as per Motor Vehicles Act, 1988\nThird Pa...",
-      "summary": "Weather: Overcast Clouds, 38.43°C, Humidity: 49%, Visibility: 10000m | Location: Verified ✓ | Policy: No obvious coverage exclusions detected from policy document"
+      "policy_coverage_note": "POLICY EXPIRED: Incident (2026-06-01) is 12 day(s) after policy expiry (2026-05-20). Claim NOT eligible — policy must be renewed.",
+      "policy_document_excerpt": "— POLICY DOCUMENT — POL-778899]\n145\nCOVERAGE DETAILS & CONDITIONS\n  OWN DAMAGE COVERAGE (Section I)\nAccidental Damage\nUp to IDV (Rs. 1,600,000) after deductibles\nFire and Exp\n  THIRD PARTY LIABILITY (Section II - Mandatory)\nThird Party Bodily Injury\nUnlimited as per Motor Vehicles Act, 1988\nThird Pa...",
+      "summary": "Weather: Few Clouds, 38.06°C, Humidity: 26%, Visibility: 8938m | Location: Verified ✓ | Policy: POLICY EXPIRED: Incident (2026-06-01) is 12 day(s) after pol..."
     },
     "settlement_recommendation": {
-      "decision": "Escalate",
+      "decision": "Reject",
       "recommended_settlement": 0,
-      "confidence": 80,
+      "confidence": 95,
       "decision_reasons": [
-        "Fraud score of 40 exceeds the Approve threshold of less than 40, indicating a Medium fraud risk",
-        "Agent 1's damage assessment indicates no visible damage observed, inconsistent with the claim description",
-        "Multiple vehicles visible in claim images suggest a possible staged collision scenario (FS-002)",
-        "The garage estimate amount of ₹8000 may be inflated, considering the minor severity of the incident"
+        "Fraud score of 92 exceeds the IRDAI Reject threshold of 70",
+        "Policy was expired at the time of incident (12 days after policy expiry on 2026-05-20), making the claim ineligible",
+        "Garage estimate underdeclaration and physics mismatch indicators suggest potential fraud",
+        "Symmetrical Damage Anomaly and Plate mismatch indicators further support the rejection decision"
       ],
       "reasoning_trail": [
-        "Step 1: Damage Assessment indicates minor severity but no visible damage observed",
-        "Step 2: Fraud Intelligence reveals a Medium fraud score of 40 and possible staged collision scenario (FS-002)",
-        "Step 3: Incident Reconstruction confirms damage matches the story with 70% confidence",
-        "Step 4: Context & Policy verification confirms location and no obvious coverage exclusions",
-        "Step 5: Historical Precedents suggest similar cases like HIST-012, but the fraud score and inconsistencies warrant escalation",
-        "Step 6: Settlement Calculation is not applicable due to escalation",
-        "Step 7: Final Decision is to Escalate the claim for further investigation"
+        "Step 1: Damage Assessment revealed a severe overall severity with a total repair estimate between ₹118,800 and ₹206,200",
+        "Step 2: Fraud Intelligence reported a high fraud score of 92 with indicators including Symmetrical Damage Anomaly, Physics Mismatch, and Garage estimate underdeclaration",
+        "Step 3: Incident Reconstruction confirmed the collision type as front impact with a confidence of 80",
+        "Step 4: Context & Policy verification revealed the policy had expired 12 days prior to the incident, rendering the claim ineligible",
+        "Step 5: Historical Precedents did not provide a direct match, but the high fraud score and policy expiry support the rejection decision",
+        "Step 6: Settlement Calculation is not applicable due to the rejection decision",
+        "Step 7: Final Decision is to reject the claim based on the high fraud score, policy expiry, and other indicators"
       ],
       "kb_precedents_applied": [
-        "FS-002"
+        "FS-001",
+        "Symmetrical Damage Anomaly",
+        "Physics Mismatch"
       ],
-      "deductibles_applied": 1000,
+      "deductibles_applied": 0,
       "status": "completed",
-      "summary": "Recommendation: Escalate | Settlement: ₹0 | Confidence: 80%",
+      "summary": "Recommendation: Reject | Settlement: ₹0 | Confidence: 95%",
       "settlement_breakdown": {
-        "repair_estimate": 8000,
-        "assessed_fair_value": null,
-        "assessed_band_min": null,
-        "assessed_band_max": null,
+        "repair_estimate": 40000,
+        "assessed_fair_value": 162500,
+        "assessed_band_min": 118800,
+        "assessed_band_max": 206200,
         "benchmark_source": "Segment parts catalog",
-        "amount_claimed": 8000,
-        "overclaim_pct": null,
-        "overclaim_band": null,
-        "overclaim_note": null,
+        "amount_claimed": 40000,
+        "overclaim_pct": -75.4,
+        "overclaim_band": "aligned",
+        "overclaim_note": "Claimed ₹40,000 is consistent with the independently assessed fair value of ₹162,500 (Segment parts catalog).",
         "disallowed_inflation": 0,
-        "parts_value": 5600,
-        "labour_value": 2400,
-        "vehicle_age_years": 4.4,
+        "parts_value": 28000,
+        "labour_value": 12000,
+        "vehicle_age_years": 5.4,
         "depreciation_pct": 50,
-        "depreciation": 2800,
+        "depreciation": 14000,
         "compulsory_deductible": 1000,
         "salvage_value": 0,
         "gst_rate_pct": 18,
-        "gst_on_labour": 432,
-        "net_payable": 4632,
+        "gst_on_labour": 2160,
+        "net_payable": 27160,
         "applies": false,
         "assumptions": "Parts/labour split assumed 70/30. Depreciation applied to the parts component per IRDAI age schedule. GST 18% on labour. Compulsory deductible Rs.1,000. Salvage assumed Rs.0 (no total loss)."
       }
     }
   },
   "summary": {
-    "fraud_risk_score": 40,
-    "fraud_risk_label": "Medium",
-    "damage_consistency": "Low",
+    "fraud_risk_score": 92,
+    "fraud_risk_label": "High",
+    "damage_consistency": "High",
     "incident_consistency": "High",
     "external_verification": "High",
-    "behavioural_analysis": "Medium Risk",
-    "overall_confidence": 80,
-    "decision": "Escalate",
+    "behavioural_analysis": "High Risk",
+    "overall_confidence": 95,
+    "decision": "Reject",
     "recommended_settlement": 0,
     "settlement_breakdown": {
-      "repair_estimate": 8000,
-      "assessed_fair_value": null,
-      "assessed_band_min": null,
-      "assessed_band_max": null,
+      "repair_estimate": 40000,
+      "assessed_fair_value": 162500,
+      "assessed_band_min": 118800,
+      "assessed_band_max": 206200,
       "benchmark_source": "Segment parts catalog",
-      "amount_claimed": 8000,
-      "overclaim_pct": null,
-      "overclaim_band": null,
-      "overclaim_note": null,
+      "amount_claimed": 40000,
+      "overclaim_pct": -75.4,
+      "overclaim_band": "aligned",
+      "overclaim_note": "Claimed ₹40,000 is consistent with the independently assessed fair value of ₹162,500 (Segment parts catalog).",
       "disallowed_inflation": 0,
-      "parts_value": 5600,
-      "labour_value": 2400,
-      "vehicle_age_years": 4.4,
+      "parts_value": 28000,
+      "labour_value": 12000,
+      "vehicle_age_years": 5.4,
       "depreciation_pct": 50,
-      "depreciation": 2800,
+      "depreciation": 14000,
       "compulsory_deductible": 1000,
       "salvage_value": 0,
       "gst_rate_pct": 18,
-      "gst_on_labour": 432,
-      "net_payable": 4632,
+      "gst_on_labour": 2160,
+      "net_payable": 27160,
       "applies": false,
       "assumptions": "Parts/labour split assumed 70/30. Depreciation applied to the parts component per IRDAI age schedule. GST 18% on labour. Compulsory deductible Rs.1,000. Salvage assumed Rs.0 (no total loss)."
     },
-    "needs_human_review": false,
-    "routing_reasons": [],
+    "needs_human_review": true,
+    "routing_reasons": [
+      "Image quality gate not passed: Damage only partially visible in frame; Photos appear blurry"
+    ],
     "image_quality": {
-      "photo_count": 1,
+      "photo_count": 2,
       "plate_visible": true,
       "issues": [
-        "Only 1 photo provided — at least 2 angles recommended"
+        "Damage only partially visible in frame",
+        "Photos appear blurry"
       ],
-      "gate_passed": true,
-      "resubmit_recommended": false
+      "gate_passed": false,
+      "resubmit_recommended": true
     }
   }
 }

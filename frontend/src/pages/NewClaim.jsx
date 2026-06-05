@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../utils/api'
+import { useAuth } from '../auth/AuthContext'
 
 function PolicyCard({ policy }) {
   return (
@@ -53,6 +54,7 @@ function EvidenceTab({ id, label, badge, active, onClick }) {
 
 export default function NewClaim() {
   const navigate = useNavigate()
+  const { session } = useAuth()
 
   const [phone, setPhone] = useState('')
   const [looking, setLooking] = useState(false)
@@ -144,7 +146,12 @@ export default function NewClaim() {
         await api.post(`/claims/${claim.claim_id}/files`, firFd)
       }
 
-      navigate(`/claims/${claim.claim_id}`)
+      // Policyholder → confirmation page; adjudicator → straight to the dashboard
+      if (session?.role === 'adjudicator') {
+        navigate(`/claims/${claim.claim_id}`)
+      } else {
+        navigate(`/submitted/${claim.claim_id}`)
+      }
     } catch (err) {
       setSubmitError(err.response?.data?.detail || 'Submission failed. Please try again.')
     } finally {

@@ -273,11 +273,11 @@
     }
   },
   "adjuster_decision": {
-    "decision": "Escalate",
+    "decision": "Settle",
     "adjuster": "Raunak",
-    "reason": "the amount claimed was too high and the story is not matching.",
+    "reason": "",
     "ai_decision": "Escalate",
-    "overridden": false,
-    "timestamp": "2026-06-04 09:07"
+    "overridden": true,
+    "timestamp": "2026-06-04 09:43"
   }
 }

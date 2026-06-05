@@ -360,14 +360,64 @@ def analytics():
     """
     claims = storage.get_all_claims()
 
+    def _settlement_amount(summary: dict) -> int:
+        """Payout figure for a claim — prefer the transparent breakdown net payable."""
+        bd = summary.get("settlement_breakdown") or {}
+        if bd.get("net_payable"):
+            return int(bd["net_payable"])
+        return int(summary.get("recommended_settlement", 0) or 0)
+
+    def _claimed_amount(claim: dict, summary: dict, bd: dict) -> int:
+        """Best estimate of what the claimant effectively asked to be paid."""
+        if bd.get("amount_claimed"):
+            return int(bd["amount_claimed"])
+        try:
+            g = float(claim.get("garage_estimate_amount") or 0)
+            if g > 0:
+                return int(g)
+        except (ValueError, TypeError):
+            pass
+        if bd.get("assessed_fair_value"):
+            return int(bd["assessed_fair_value"])
+        rec = summary.get("recommended_settlement") or 0
+        if rec:
+            return int(rec)
+        try:
+            return int(float(claim.get("claim_amount") or 0))
+        except (ValueError, TypeError):
+            return 0
+
     decisions: dict[str, int] = {}
     claim_types: dict[str, int] = {}
     fraud_scores: list[dict] = []
     indicator_counts: dict[str, int] = {}
     settlement_by_vehicle: dict[str, list[int]] = {}
-    total_settled = 0
+    total_settled = 0          # money a HUMAN actually approved/settled
+    pending_settlement = 0     # AI-approved but awaiting human sign-off (exposure)
+    awaiting_review = 0        # investigated, no human decision yet
+    human_reviewed = 0         # has an adjuster decision recorded
     fraud_score_sum = 0
     investigated = 0
+
+    # ── #1 Financial ──────────────────────────────────────────────────────────
+    leakage_prevented = 0       # rejected claim amounts + disallowed inflation
+    deductions_recovered = 0    # depreciation + deductible + salvage on approved
+    total_claimed_approved = 0  # for settlement-ratio
+    payout_amounts: list[int] = []
+
+    # ── #2 Fraud & Risk ───────────────────────────────────────────────────────
+    fraud_levels = {"Low": 0, "Medium": 0, "High": 0}
+    scheme_counts: dict[str, int] = {}
+    fraud_exposure_stopped = 0  # ₹ of High-risk claims not paid out
+
+    # ── #4 AI ↔ Human Governance ──────────────────────────────────────────────
+    gov_agreed = 0
+    gov_overridden = 0
+    override_matrix: dict[tuple, int] = {}
+    confidence_sum = 0
+    confidence_n = 0
+    needs_review_count = 0
+    image_gate_failed = 0
 
     for c in claims:
         # Claim type tally
@@ -381,8 +431,10 @@ def analytics():
         investigated += 1
         summary = result["summary"]
         agents  = result.get("agents", {})
+        adj     = result.get("adjuster_decision") or {}
+        human_decision = adj.get("decision")   # None until an adjudicator acts
 
-        # Decisions
+        # Decisions (AI recommendation)
         dec = summary.get("decision", "Unknown")
         decisions[dec] = decisions.get(dec, 0) + 1
 
@@ -397,12 +449,19 @@ def analytics():
             "date": c.get("created_at", ""),
         })
 
-        # Settlement
-        settled = summary.get("recommended_settlement", 0) or 0
-        if settled > 0:
-            total_settled += settled
-            vehicle = c.get("vehicle", "Unknown")
-            settlement_by_vehicle.setdefault(vehicle, []).append(settled)
+        # Settlement — only count money a HUMAN actually approved as "settled"
+        amount  = _settlement_amount(summary)
+        vehicle = c.get("vehicle", "Unknown")
+        if human_decision:
+            human_reviewed += 1
+            if human_decision in ("Approve", "Settle"):
+                total_settled += amount
+                if amount > 0:
+                    settlement_by_vehicle.setdefault(vehicle, []).append(amount)
+        else:
+            awaiting_review += 1
+            if dec == "Approve":
+                pending_settlement += amount
 
         # Fraud indicators
         indicators = agents.get("fraud_intelligence", {}).get("indicators", [])
@@ -410,6 +469,64 @@ def analytics():
             # Extract the indicator ID if present (e.g. "FI-POL-001: ...")
             key = ind.split(":")[0].strip() if ":" in ind else ind[:60]
             indicator_counts[key] = indicator_counts.get(key, 0) + 1
+
+        # ── Breakdown (compute on the fly if a pre-feature claim lacks it) ──────
+        breakdown = summary.get("settlement_breakdown") or {}
+        if not breakdown:
+            try:
+                from services.settlement_calc import compute_settlement_breakdown
+                policy_c = storage.get_policy_by_phone(c.get("phone", ""))
+                breakdown = compute_settlement_breakdown(
+                    c, policy_c, agents.get("damage_assessment", {}), dec
+                ) or {}
+            except Exception:
+                breakdown = {}
+
+        effective = human_decision or dec
+        claimed = _claimed_amount(c, summary, breakdown)
+        disallowed = int(breakdown.get("disallowed_inflation") or 0)
+
+        # ── #1 Financial ───────────────────────────────────────────────────────
+        if effective == "Reject":
+            leakage_prevented += claimed          # full ask blocked
+        leakage_prevented += disallowed           # inflation trimmed (any claim)
+
+        if human_decision in ("Approve", "Settle"):
+            deductions_recovered += (
+                int(breakdown.get("depreciation") or 0)
+                + int(breakdown.get("compulsory_deductible") or 0)
+                + int(breakdown.get("salvage_value") or 0)
+            )
+            total_claimed_approved += claimed
+            payout_amounts.append(_settlement_amount(summary))
+
+        # ── #2 Fraud & Risk ──────────────────────────────────────────────────
+        flabel = summary.get("fraud_risk_label", "Unknown")
+        if flabel in fraud_levels:
+            fraud_levels[flabel] += 1
+        for s in (agents.get("fraud_intelligence", {}).get("matched_schemes") or []):
+            sk = s.split(":")[0].strip() if ":" in s else s[:50]
+            scheme_counts[sk] = scheme_counts.get(sk, 0) + 1
+        if flabel == "High" and effective in ("Reject", "Escalate"):
+            fraud_exposure_stopped += claimed
+
+        # ── #4 AI ↔ Human Governance ─────────────────────────────────────────
+        conf = summary.get("overall_confidence")
+        if isinstance(conf, (int, float)):
+            confidence_sum += conf
+            confidence_n += 1
+        if summary.get("needs_human_review"):
+            needs_review_count += 1
+        iq = summary.get("image_quality") or {}
+        if iq and not iq.get("gate_passed", True):
+            image_gate_failed += 1
+        if human_decision:
+            if human_decision == dec:
+                gov_agreed += 1
+            else:
+                gov_overridden += 1
+                mk = (dec or "?", human_decision)
+                override_matrix[mk] = override_matrix.get(mk, 0) + 1
 
     # Sort and shape outputs
     top_indicators = sorted(
@@ -428,6 +545,37 @@ def analytics():
 
     avg_fraud = round(fraud_score_sum / investigated, 1) if investigated else 0
 
+    # Payout size distribution (human-approved claims)
+    _buckets = [
+        ("< ₹10k", 0, 10000),
+        ("₹10k–50k", 10000, 50000),
+        ("₹50k–1L", 50000, 100000),
+        ("> ₹1L", 100000, float("inf")),
+    ]
+    payout_buckets = [
+        {"name": name, "value": sum(1 for a in payout_amounts if lo <= a < hi)}
+        for name, lo, hi in _buckets
+    ]
+
+    settlement_ratio_pct = (
+        round(total_settled / total_claimed_approved * 100)
+        if total_claimed_approved else None
+    )
+
+    matched_schemes = sorted(
+        [{"name": k, "count": v} for k, v in scheme_counts.items()],
+        key=lambda x: -x["count"],
+    )[:8]
+
+    avg_confidence = round(confidence_sum / confidence_n) if confidence_n else None
+    agreement_rate = (
+        round(gov_agreed / human_reviewed * 100) if human_reviewed else None
+    )
+    override_out = sorted(
+        [{"ai": ai, "human": human, "count": ct} for (ai, human), ct in override_matrix.items()],
+        key=lambda x: -x["count"],
+    )
+
     return {
         "decisions": [{"name": k, "value": v} for k, v in sorted(decisions.items())],
         "claim_types": [{"name": k, "value": v} for k, v in sorted(claim_types.items(), key=lambda x: -x[1])],
@@ -438,7 +586,35 @@ def analytics():
             "claims": len(claims),
             "investigated": investigated,
             "avg_fraud_score": avg_fraud,
-            "total_settled": total_settled,
+            "total_settled": total_settled,          # human-approved payouts
+            "pending_settlement": pending_settlement, # AI-approved, awaiting human
+            "awaiting_review": awaiting_review,
+            "human_reviewed": human_reviewed,
+        },
+        # ── #1 Financial ────────────────────────────────────────────────────────
+        "financial": {
+            "leakage_prevented": leakage_prevented,
+            "deductions_recovered": deductions_recovered,
+            "settlement_ratio_pct": settlement_ratio_pct,
+            "total_claimed_approved": total_claimed_approved,
+            "payout_buckets": payout_buckets,
+        },
+        # ── #2 Fraud & Risk ──────────────────────────────────────────────────────
+        "fraud": {
+            "levels": [{"name": k, "value": fraud_levels[k]} for k in ("Low", "Medium", "High")],
+            "matched_schemes": matched_schemes,
+            "exposure_stopped": fraud_exposure_stopped,
+        },
+        # ── #4 AI ↔ Human Governance ─────────────────────────────────────────────
+        "governance": {
+            "reviewed": human_reviewed,
+            "agreed": gov_agreed,
+            "overridden": gov_overridden,
+            "agreement_rate": agreement_rate,
+            "override_matrix": override_out,
+            "avg_confidence": avg_confidence,
+            "needs_review": needs_review_count,
+            "image_gate_failed": image_gate_failed,
         },
     }
 

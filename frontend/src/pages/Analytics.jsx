@@ -9,6 +9,9 @@ import api from '../utils/api'
 // ── Colour palettes ───────────────────────────────────────────────────────────
 const DECISION_COLORS = { Approve: '#22c55e', Escalate: '#f59e0b', Reject: '#ef4444' }
 const PIE_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4']
+const FRAUD_LEVEL_COLORS = { Low: '#22c55e', Medium: '#f59e0b', High: '#ef4444' }
+
+const inr = (v) => `₹${Number(v || 0).toLocaleString('en-IN')}`
 
 // ── Small stat card ───────────────────────────────────────────────────────────
 function StatCard({ label, value, sub }) {
@@ -76,7 +79,10 @@ export default function Analytics() {
     )
   }
 
-  const { decisions, claim_types, fraud_scores, top_indicators, settlement_by_vehicle, totals } = data
+  const {
+    decisions, claim_types, fraud_scores, top_indicators, settlement_by_vehicle, totals,
+    financial = {}, fraud = {}, governance = {},
+  } = data
 
   return (
     <div className="max-w-7xl mx-auto space-y-4">
@@ -95,14 +101,42 @@ export default function Analytics() {
           sub="across investigated claims"
         />
         <StatCard
-          label="Total Settled"
+          label="Settled (Approved)"
           value={`₹${totals.total_settled.toLocaleString('en-IN')}`}
-          sub="approved settlements"
+          sub={`${totals.human_reviewed ?? 0} human-reviewed`}
         />
         <StatCard
-          label="Investigation Rate"
-          value={totals.claims ? `${Math.round((totals.investigated / totals.claims) * 100)}%` : '—'}
-          sub={`${totals.investigated} of ${totals.claims} claims`}
+          label="Awaiting Human Review"
+          value={totals.awaiting_review ?? 0}
+          sub={
+            (totals.pending_settlement ?? 0) > 0
+              ? `₹${totals.pending_settlement.toLocaleString('en-IN')} pending payout`
+              : 'investigated, no decision yet'
+          }
+        />
+      </div>
+
+      {/* ── Business-impact row (Financial + Governance headline) ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Leakage Prevented"
+          value={inr(financial.leakage_prevented)}
+          sub="rejections + inflation trimmed"
+        />
+        <StatCard
+          label="Deductions Recovered"
+          value={inr(financial.deductions_recovered)}
+          sub="depreciation + deductibles"
+        />
+        <StatCard
+          label="Fraud Exposure Stopped"
+          value={inr(fraud.exposure_stopped)}
+          sub="high-risk claims not paid"
+        />
+        <StatCard
+          label="AI–Human Agreement"
+          value={governance.agreement_rate != null ? `${governance.agreement_rate}%` : '—'}
+          sub={`${governance.overridden ?? 0} override${(governance.overridden ?? 0) === 1 ? '' : 's'} of ${governance.reviewed ?? 0} reviewed`}
         />
       </div>
 
@@ -270,6 +304,128 @@ export default function Analytics() {
           }
         </Section>
 
+      </div>
+
+      {/* ── Row 5: Fraud risk levels + Matched schemes ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Section title="Fraud Risk Levels">
+          {(fraud.levels || []).every(l => l.value === 0)
+            ? <p className="text-slate-500 text-sm">No investigated claims yet.</p>
+            : (
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie
+                    data={fraud.levels}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={80}
+                    innerRadius={44}
+                    paddingAngle={3}
+                    label={({ name, value }) => `${name}: ${value}`}
+                    labelLine={false}
+                  >
+                    {(fraud.levels || []).map((l) => (
+                      <Cell key={l.name} fill={FRAUD_LEVEL_COLORS[l.name] || '#64748b'} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<ChartTooltip />} />
+                </PieChart>
+              </ResponsiveContainer>
+            )
+          }
+        </Section>
+
+        <Section title="Top Matched Fraud Schemes">
+          {(fraud.matched_schemes || []).length === 0
+            ? <p className="text-slate-500 text-sm">No fraud schemes matched yet.</p>
+            : (
+              <div className="space-y-2">
+                {fraud.matched_schemes.map((s, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="text-xs text-slate-500 w-4 text-right">{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-center mb-0.5">
+                        <span className="text-xs text-slate-300 truncate">{s.name}</span>
+                        <span className="text-xs text-slate-500 ml-2 flex-shrink-0">{s.count}×</span>
+                      </div>
+                      <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-red-500/80 rounded-full"
+                          style={{ width: `${(s.count / (fraud.matched_schemes[0]?.count || 1)) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          }
+        </Section>
+      </div>
+
+      {/* ── Row 6: AI↔Human governance + Payout distribution ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Section title="AI vs Human Governance">
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            {[
+              { label: 'Agreement', value: governance.agreement_rate != null ? `${governance.agreement_rate}%` : '—' },
+              { label: 'Avg Confidence', value: governance.avg_confidence != null ? `${governance.avg_confidence}%` : '—' },
+              { label: 'Routed to Human', value: governance.needs_review ?? 0 },
+            ].map(s => (
+              <div key={s.label} className="bg-slate-800/60 rounded-lg p-3 text-center">
+                <p className="text-lg font-bold text-white">{s.value}</p>
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">{s.label}</p>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Override Matrix (AI → Human)</p>
+          {(governance.override_matrix || []).length === 0
+            ? <p className="text-slate-500 text-sm">No adjudicator overrides yet — AI decisions upheld.</p>
+            : (
+              <div className="space-y-1.5">
+                {governance.override_matrix.map((o, i) => (
+                  <div key={i} className="flex items-center justify-between bg-slate-800/40 rounded-lg px-3 py-2">
+                    <span className="text-xs">
+                      <span className="text-slate-400">{o.ai}</span>
+                      <span className="text-slate-600 mx-2">→</span>
+                      <span className="text-indigo-300 font-medium">{o.human}</span>
+                    </span>
+                    <span className="text-xs text-slate-500">{o.count}×</span>
+                  </div>
+                ))}
+              </div>
+            )
+          }
+          {(governance.image_gate_failed ?? 0) > 0 && (
+            <p className="text-[11px] text-amber-400/80 mt-3">
+              📷 {governance.image_gate_failed} claim{governance.image_gate_failed === 1 ? '' : 's'} failed the image-quality gate (resubmission recommended).
+            </p>
+          )}
+        </Section>
+
+        <Section title="Settlement Size Distribution">
+          {(financial.payout_buckets || []).every(b => b.value === 0)
+            ? <p className="text-slate-500 text-sm">No approved settlements yet.</p>
+            : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={financial.payout_buckets} barSize={48}>
+                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+                  <Bar dataKey="value" radius={[6, 6, 0, 0]} fill="#22c55e" />
+                </BarChart>
+              </ResponsiveContainer>
+            )
+          }
+          {financial.settlement_ratio_pct != null && (
+            <p className="text-[11px] text-slate-500 mt-2">
+              Avg payout is <span className="text-slate-300 font-medium">{financial.settlement_ratio_pct}%</span> of the amount claimed on approved claims.
+            </p>
+          )}
+        </Section>
       </div>
     </div>
   )
