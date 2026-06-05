@@ -121,8 +121,9 @@ def _vehicle_age_years(policy: dict, claim: dict) -> Optional[float]:
 # How far the claimed/garage amount may sit ABOVE the independent assessed value
 # before it stops looking normal. Mirrors real surveyor practice: a quote a little
 # over the assessed cost is routine; a large gap is the workshop-inflation pattern.
-ALIGNED_TOLERANCE_PCT = 10   # within +10% of assessed → perfectly normal
-INFLATION_PCT         = 40   # beyond +40% → inflation; cap payout at assessed ceiling
+ALIGNED_TOLERANCE_PCT  = 10   # within +10% of assessed → perfectly normal
+INFLATION_PCT          = 40   # beyond +40% → inflation; cap payout at assessed ceiling
+UNDERCLAIM_PCT         = 20   # more than 20% below assessed → flag as under-claim
 
 _SOURCE_LABELS = {
     "live_web":        "Live web market prices",
@@ -218,11 +219,28 @@ def _assess_repair(damage: dict) -> dict:
             f"₹{disallowed:,.0f} disallowed pending surveyor review."
         )
 
-    out["approved_basis"]      = round(basis)
-    out["overclaim_pct"]       = round(overclaim_pct, 1)
-    out["overclaim_band"]      = band
-    out["overclaim_note"]      = note
-    out["disallowed_inflation"] = round(disallowed)
+    out["approved_basis"]       = round(basis)
+    out["overclaim_pct"]        = round(overclaim_pct, 1)
+    out["overclaim_band"]       = band
+    out["overclaim_note"]       = note
+    out["disallowed_inflation"]  = round(disallowed)
+
+    # ── Under-claim advisory ───────────────────────────────────────────────────
+    # If the customer claimed significantly LESS than the independently assessed
+    # value, they will be under-compensated even before deductions. Flag it so
+    # the adjudicator can advise the customer to revise their claim upward.
+    underclaim_advisory = None
+    if overclaim_pct < -(UNDERCLAIM_PCT):
+        gap = round(assessed_mid - claimed)
+        underclaim_advisory = (
+            f"Customer claimed ₹{claimed:,.0f} but the independently assessed "
+            f"repair cost is ₹{assessed_mid:,.0f} — the claim is "
+            f"₹{gap:,.0f} ({abs(overclaim_pct):.0f}%) below the assessed value. "
+            f"The customer may be unaware that deductions (depreciation, deductible) "
+            f"will further reduce their payout. Advise the customer to revise their "
+            f"claim to the full assessed amount of ₹{round(assessed_max):,.0f} before settlement."
+        )
+    out["underclaim_advisory"] = underclaim_advisory
     return out
 
 
@@ -354,6 +372,7 @@ def compute_settlement_breakdown(
         "overclaim_band":        assess.get("overclaim_band"),
         "overclaim_note":        assess.get("overclaim_note"),
         "disallowed_inflation":  assess.get("disallowed_inflation", 0),
+        "underclaim_advisory":   assess.get("underclaim_advisory"),
         # Depreciation
         "zero_dep":              zero_dep,
         "vehicle_age_years":     round(age, 1) if age is not None else None,

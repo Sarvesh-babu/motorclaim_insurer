@@ -39,8 +39,27 @@ export default function ClaimOverview({ claim, policy }) {
           <h2 className="text-xl font-bold text-white">{claim.claimant}</h2>
         </div>
         <div className="text-right">
-          <p className="text-2xl font-bold text-white">₹{Number(claim.claim_amount).toLocaleString('en-IN')}</p>
-          <p className="text-xs text-slate-400">Claimed Amount</p>
+          {/* garage_estimate_amount = what the customer actually claimed */}
+          {Number(claim.garage_estimate_amount) > 0 ? (
+            <div className="space-y-0.5">
+              <p className="text-2xl font-bold text-white">
+                ₹{Number(claim.garage_estimate_amount).toLocaleString('en-IN')}
+              </p>
+              <p className="text-xs text-slate-400">Customer Claimed</p>
+              {Number(claim.claim_amount) > 0 && (
+                <p className="text-xs text-indigo-300">
+                  AI Assessed: ₹{Number(claim.claim_amount).toLocaleString('en-IN')}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div>
+              <p className="text-2xl font-bold text-white">
+                ₹{Number(claim.claim_amount).toLocaleString('en-IN')}
+              </p>
+              <p className="text-xs text-slate-400">AI Assessed</p>
+            </div>
+          )}
         </div>
       </div>
 

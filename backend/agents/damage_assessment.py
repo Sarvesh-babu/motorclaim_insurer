@@ -177,6 +177,18 @@ class DamageAssessmentAgent(BaseAgent):
             result["vehicle_segment"] = pricing["segment"]
             result["pricing_method"] = pricing["pricing_method"]
             result["pricing_sources"] = pricing["pricing_sources"]
+            # Regenerate the summary string now that we have real prices.
+            # The LLM's summary said ₹0–₹0 because it was told not to price.
+            est   = pricing["total_repair_estimate"]
+            lo, hi = est.get("min", 0), est.get("max", 0)
+            n_parts = len(result.get("damaged_parts") or [])
+            match   = result.get("vehicle_match_in_image", "Unclear")
+            sev     = result.get("overall_severity", "Unknown")
+            result["summary"] = (
+                f"Severity: {sev} | Est. Repair: "
+                f"₹{lo:,}–₹{hi:,} | "
+                f"Parts: {n_parts} damaged | Vehicle Match: {match}"
+            )
         except Exception as e:
             result["pricing_method"] = f"unavailable ({e})"
 

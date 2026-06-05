@@ -2,10 +2,14 @@
   "claim_id": "CLM-2026-06-000001",
   "agents": {
     "damage_assessment": {
+      "damage_present": true,
+      "no_damage_reason": null,
       "damaged_parts": [
         {
           "part": "bonnet",
           "severity": "Severe",
+          "confidence": "High",
+          "visible_evidence": "severe deformation and creasing on the bonnet",
           "bounding_box": {
             "image_index": 0,
             "x": 20.0,
@@ -23,6 +27,8 @@
         {
           "part": "front_bumper",
           "severity": "Severe",
+          "confidence": "High",
+          "visible_evidence": "crushed and deformed bumper with exposed underlying structure",
           "bounding_box": {
             "image_index": 0,
             "x": 15.0,
@@ -40,6 +46,8 @@
         {
           "part": "headlight_left",
           "severity": "Severe",
+          "confidence": "High",
+          "visible_evidence": "headlight assembly appears to be damaged and detached",
           "bounding_box": {
             "image_index": 0,
             "x": 10.0,
@@ -56,7 +64,9 @@
         },
         {
           "part": "radiator_grille",
-          "severity": "Severe",
+          "severity": "Moderate",
+          "confidence": "High",
+          "visible_evidence": "deformation and possible partial detachment of grille",
           "bounding_box": {
             "image_index": 0,
             "x": 25.0,
@@ -64,25 +74,25 @@
             "w": 30.0,
             "h": 15.0
           },
-          "repair_type": "Replace",
+          "repair_type": "Repair",
           "repair_estimate_INR": {
-            "min": 5000,
-            "max": 8700
+            "min": 3200,
+            "max": 4600
           },
           "pricing_source": "segment_catalog"
         }
       ],
       "overall_severity": "Severe",
       "total_repair_estimate": {
-        "min": 39000,
-        "max": 67500
+        "min": 37200,
+        "max": 63400
       },
       "consistent_with_description": "High",
-      "notes": "The vehicle has severe damage to the front end, consistent with a high-speed impact.",
+      "notes": "The vehicle appears to be a Kia Seltos HTX Plus with significant front-end damage consistent with a high-speed impact.",
       "vehicle_match_in_image": "Yes",
-      "vehicle_seen_description": "Kia Seltos HTX Plus, orange color",
+      "vehicle_seen_description": "The vehicle in the image is an orange Kia Seltos with the registration plate TN12AJ1603.",
       "registration_plate_visible": true,
-      "plate_text_in_image": "TN 12 AJ 1603",
+      "plate_text_in_image": "TN12AJ1603",
       "pre_existing_damage_observed": false,
       "pre_existing_damage_notes": null,
       "multiple_vehicles_in_frame": false,
@@ -97,10 +107,10 @@
         "segment_catalog"
       ],
       "garage_estimate_provided": true,
-      "garage_estimate_amount_inr": 45000.0,
-      "garage_vs_ai_variance_pct": -15.5,
+      "garage_estimate_amount_inr": 30000.0,
+      "garage_vs_ai_variance_pct": -40.4,
       "garage_inflation_flag": false,
-      "garage_inflation_note": "Garage estimate ₹45,000 is 15% lower than AI mid-estimate ₹53,250",
+      "garage_inflation_note": "Garage estimate ₹30,000 is 40% lower than AI mid-estimate ₹50,300",
       "image_quality": {
         "photo_count": 1,
         "plate_visible": true,
@@ -112,51 +122,56 @@
       }
     },
     "fraud_intelligence": {
-      "fraud_score": 20,
-      "fraud_label": "Low",
+      "fraud_score": 39,
+      "fraud_label": "Medium",
       "indicators": [
-        "Claim filed 4 days after incident — borderline late reporting"
+        "Garage estimate ₹30,000 is 40% below AI estimate — suspicious underdeclaration",
+        "No FIR uploaded for 'Motor - Third Party' claim — FIR is mandatory for theft and third-party incidents"
       ],
       "matched_schemes": [],
-      "kb_references": [],
-      "policy_age_days": 654,
+      "kb_references": [
+        "FS-001",
+        "FI-CLM-003"
+      ],
+      "policy_age_days": 656,
       "nps_risk_level": "None",
       "status": "completed",
-      "summary": "Fraud Risk: 20% (Low) | Top flag: Claim filed 4 days after incident — borderline late reporting"
+      "summary": "Fraud Risk: 42% (Medium) | Top flag: Garage estimate ₹30,000 is 40% below AI estimate — suspicious underdeclaration",
+      "fraud_score_base": 24
     },
     "incident_reconstruction": {
       "collision_type": "Front impact",
       "impact_direction": "Direct frontal impact",
-      "reconstruction": "The vehicle was involved in a severe frontal collision, likely with another vehicle or a stationary object. The extensive damage to the front-end components, including the bonnet, front bumper, headlight, and radiator grille, suggests a high-energy impact.",
+      "reconstruction": "The vehicle was involved in a frontal collision with another vehicle or object. The damage pattern suggests a high-energy impact, likely at a significant speed. The front bumper, bonnet, and headlights show severe damage, indicating a substantial force was applied to the front of the vehicle.",
       "reconstruction_bullets": [
-        "The damage pattern indicates a severe frontal collision with significant force, causing extensive damage to the front-end structure.",
-        "The lack of damage to the rear or side sections of the vehicle suggests that the impact was isolated to the front.",
-        "The claimant's story of being hit by a car coming from the wrong side is plausible given the damage pattern."
+        "The damage to the front bumper, bonnet, and headlights is consistent with a high-speed frontal collision.",
+        "The severity of the damage suggests that the impact was likely with a large vehicle or at a significant speed.",
+        "The lack of damage to other parts of the vehicle suggests that the impact was primarily frontal."
       ],
       "storyboard_panels": [
         {
           "panel": 1,
           "title": "Pre-Incident",
           "emoji": "🚗",
-          "description": "The Kia Seltos was driving on a road near Karapakkam when a vehicle approached from the opposite direction."
+          "description": "The Kia Seltos was driving on a road near Perungudi when it was hit by another vehicle coming from the wrong side."
         },
         {
           "panel": 2,
           "title": "Point of Impact",
           "emoji": "💥",
-          "description": "The vehicle from the opposite direction collided with the Kia Seltos, causing severe damage to the front-end."
+          "description": "The vehicle was struck directly on the front, causing severe damage to the bumper, bonnet, and headlights."
         },
         {
           "panel": 3,
           "title": "Immediate Aftermath",
           "emoji": "🔧",
-          "description": "The Kia Seltos suffered extensive front-end damage, including a crumpled bonnet and damaged headlights."
+          "description": "The vehicle was severely damaged, with the bonnet crumpled and the front bumper detached."
         },
         {
           "panel": 4,
           "title": "Evidence Summary",
           "emoji": "🔍",
-          "description": "The physical evidence supports the claimant's story of a frontal collision, with no indications of staging or pre-existing damage."
+          "description": "The physical evidence suggests a high-energy frontal collision, consistent with the claimant's story of being hit by another vehicle."
         }
       ],
       "damage_matches_story": true,
@@ -171,100 +186,117 @@
     "context_verification": {
       "status": "completed",
       "location_verified": true,
-      "geocoded_location": "Karapakkam, Zone 15 Sholinganallur, Chennai Corporation, Sholinganallur, Chennai, Tamil Nadu, 600096, India",
+      "geocoded_location": "Zone 14 Perungudi, Chennai Corporation, Sholinganallur, Chennai, Tamil Nadu, India",
       "coordinates": {
-        "lat": 12.9117073,
-        "lon": 80.2277203
+        "lat": 12.9710239,
+        "lon": 80.2418051
       },
-      "weather": "Overcast Clouds, 36.5°C, Humidity: 51%, Visibility: 10000m",
-      "traffic": "Moderate",
+      "weather": "Overcast Clouds, 38.43°C, Humidity: 48%, Visibility: 10000m",
       "policy_coverage_note": "No obvious coverage exclusions detected from policy document",
       "policy_document_excerpt": "— POLICY DOCUMENT — POL-112233]\n145\nCOVERAGE DETAILS & CONDITIONS\n  OWN DAMAGE COVERAGE (Section I)\nAccidental Damage\nUp to IDV (Rs. 1,600,000) after deductibles\nFire and Exp\n  THIRD PARTY LIABILITY (Section II - Mandatory)\nThird Party Bodily Injury\nUnlimited as per Motor Vehicles Act, 1988\nThird Pa...",
-      "summary": "Weather: Overcast Clouds, 36.5°C, Humidity: 51%, Visibility: 10000m | Location: Verified ✓ | Policy: No obvious coverage exclusions detected from policy document"
+      "summary": "Weather: Overcast Clouds, 38.43°C, Humidity: 48%, Visibility: 10000m | Location: Verified ✓ | Policy: No obvious coverage exclusions detected from policy document"
     },
     "settlement_recommendation": {
-      "decision": "Approve",
-      "recommended_settlement": 30680,
-      "confidence": 90,
+      "decision": "Escalate",
+      "recommended_settlement": 0,
+      "confidence": 80,
       "decision_reasons": [
-        "Fraud score 20 is below the IRDAI auto-approve threshold of 40",
-        "Damage assessment indicates severe damage consistent with the high-speed impact description",
-        "Location verification confirms the incident occurred at Karapakkam, Chennai",
-        "No pre-existing damage observed, and garage inflation flag is False",
-        "Vehicle match in image verified, and garage estimate amount is within the total repair estimate range"
+        "Fraud score of 39 is close to the Escalate threshold of 40, indicating a need for further review",
+        "Garage estimate of ₹30,000 is 40% below AI estimate, raising suspicions of underdeclaration",
+        "No FIR uploaded for 'Motor - Third Party' claim, which is mandatory for such incidents",
+        "Damage assessment indicates significant front-end damage consistent with a high-speed impact, but garage estimate variance is high"
       ],
       "reasoning_trail": [
-        "Step 1: Damage Assessment indicates severe damage to the front end, consistent with a high-speed impact",
-        "Step 2: Fraud Intelligence reports a low fraud score of 20, indicating a low risk of fraud",
-        "Step 3: Incident Reconstruction confirms the collision type as front impact, consistent with the story",
-        "Step 4: Context & Policy verification confirms the location, weather, and policy coverage",
-        "Step 5: No historical precedents or known fraud schemes matched",
-        "Step 6: Settlement Calculation applies IRDAI depreciation and deducts compulsory deductible",
-        "Step 7: Final Decision approves the claim based on the evidence and low fraud score"
+        "Step 1: Damage Assessment indicates significant front-end damage consistent with a high-speed impact",
+        "Step 2: Fraud Intelligence reveals a fraud score of 39, close to the Escalate threshold, and indicators of underdeclaration",
+        "Step 3: Incident Reconstruction confirms damage matches the story with 80% confidence",
+        "Step 4: Context & Policy verification confirms location and no obvious coverage exclusions",
+        "Step 5: Historical Precedents do not provide a direct match, but HIST-014 and FS-004 indicate the need for caution in similar cases",
+        "Step 6: Settlement Calculation is not applicable due to Escalation decision",
+        "Step 7: Final Decision is to Escalate the claim for further review due to mixed signals and incomplete documentation"
       ],
-      "kb_precedents_applied": [],
+      "kb_precedents_applied": [
+        "HIST-014",
+        "FS-004"
+      ],
       "deductibles_applied": 1000,
       "status": "completed",
-      "summary": "Recommendation: Approve | Settlement: ₹59400 | Confidence: 90%",
+      "summary": "Recommendation: Escalate | Settlement: ₹0 | Confidence: 80%",
       "settlement_breakdown": {
-        "repair_estimate": 45000,
-        "assessed_fair_value": 53250,
-        "assessed_band_min": 39000,
-        "assessed_band_max": 67500,
+        "is_total_loss": false,
+        "total_loss_note": null,
+        "repair_estimate": 30000,
+        "assessed_fair_value": 50300,
+        "assessed_band_min": 37200,
+        "assessed_band_max": 63400,
         "benchmark_source": "Segment parts catalog",
-        "amount_claimed": 45000,
-        "overclaim_pct": -15.5,
+        "amount_claimed": 30000,
+        "overclaim_pct": -40.4,
         "overclaim_band": "aligned",
-        "overclaim_note": "Claimed ₹45,000 is consistent with the independently assessed fair value of ₹53,250 (Segment parts catalog).",
+        "overclaim_note": "Claimed ₹30,000 is consistent with the independently assessed fair value of ₹50,300 (Segment parts catalog).",
         "disallowed_inflation": 0,
-        "parts_value": 31500,
-        "labour_value": 13500,
-        "vehicle_age_years": 4.3,
+        "zero_dep": false,
+        "vehicle_age_years": 4.4,
         "depreciation_pct": 50,
-        "depreciation": 15750,
+        "depreciation": 17605,
+        "depreciation_note": "Material-specific depreciation (IRDAI): glass 0%, rubber/tyre 50%, metal 50% — vehicle age ~4.4 yr.",
         "compulsory_deductible": 1000,
-        "salvage_value": 0,
+        "voluntary_deductible": 0,
+        "total_deductible": 1000,
+        "gst_parts": 3780,
+        "gst_on_labour": 1620,
         "gst_rate_pct": 18,
-        "gst_on_labour": 2430,
-        "net_payable": 30680,
-        "applies": true,
-        "assumptions": "Parts/labour split assumed 70/30. Depreciation applied to the parts component per IRDAI age schedule. GST 18% on labour. Compulsory deductible Rs.1,000. Salvage assumed Rs.0 (no total loss)."
+        "salvage_value": 0,
+        "net_payable": 16795,
+        "sum_insured_cap": 950000,
+        "applies": false,
+        "ncb_pct": 0,
+        "ncb_advisory": null,
+        "assumptions": "Depreciation: Material-specific depreciation (IRDAI): glass 0%, rubber/tyre 50%, metal 50% — vehicle age ~4.4 yr. | Deductibles: compulsory ₹1,000 + voluntary ₹0 | GST: 28% on parts, 18% on labour | Payout capped at sum insured ₹950,000."
       }
     }
   },
   "summary": {
-    "fraud_risk_score": 20,
-    "fraud_risk_label": "Low",
+    "fraud_risk_score": 39,
+    "fraud_risk_label": "Medium",
     "damage_consistency": "High",
     "incident_consistency": "High",
     "external_verification": "High",
-    "behavioural_analysis": "Low Risk",
-    "overall_confidence": 90,
-    "decision": "Approve",
-    "recommended_settlement": 30680,
+    "behavioural_analysis": "Medium Risk",
+    "overall_confidence": 80,
+    "decision": "Escalate",
+    "recommended_settlement": 0,
     "settlement_breakdown": {
-      "repair_estimate": 45000,
-      "assessed_fair_value": 53250,
-      "assessed_band_min": 39000,
-      "assessed_band_max": 67500,
+      "is_total_loss": false,
+      "total_loss_note": null,
+      "repair_estimate": 30000,
+      "assessed_fair_value": 50300,
+      "assessed_band_min": 37200,
+      "assessed_band_max": 63400,
       "benchmark_source": "Segment parts catalog",
-      "amount_claimed": 45000,
-      "overclaim_pct": -15.5,
+      "amount_claimed": 30000,
+      "overclaim_pct": -40.4,
       "overclaim_band": "aligned",
-      "overclaim_note": "Claimed ₹45,000 is consistent with the independently assessed fair value of ₹53,250 (Segment parts catalog).",
+      "overclaim_note": "Claimed ₹30,000 is consistent with the independently assessed fair value of ₹50,300 (Segment parts catalog).",
       "disallowed_inflation": 0,
-      "parts_value": 31500,
-      "labour_value": 13500,
-      "vehicle_age_years": 4.3,
+      "zero_dep": false,
+      "vehicle_age_years": 4.4,
       "depreciation_pct": 50,
-      "depreciation": 15750,
+      "depreciation": 17605,
+      "depreciation_note": "Material-specific depreciation (IRDAI): glass 0%, rubber/tyre 50%, metal 50% — vehicle age ~4.4 yr.",
       "compulsory_deductible": 1000,
-      "salvage_value": 0,
+      "voluntary_deductible": 0,
+      "total_deductible": 1000,
+      "gst_parts": 3780,
+      "gst_on_labour": 1620,
       "gst_rate_pct": 18,
-      "gst_on_labour": 2430,
-      "net_payable": 30680,
-      "applies": true,
-      "assumptions": "Parts/labour split assumed 70/30. Depreciation applied to the parts component per IRDAI age schedule. GST 18% on labour. Compulsory deductible Rs.1,000. Salvage assumed Rs.0 (no total loss)."
+      "salvage_value": 0,
+      "net_payable": 16795,
+      "sum_insured_cap": 950000,
+      "applies": false,
+      "ncb_pct": 0,
+      "ncb_advisory": null,
+      "assumptions": "Depreciation: Material-specific depreciation (IRDAI): glass 0%, rubber/tyre 50%, metal 50% — vehicle age ~4.4 yr. | Deductibles: compulsory ₹1,000 + voluntary ₹0 | GST: 28% on parts, 18% on labour | Payout capped at sum insured ₹950,000."
     },
     "needs_human_review": false,
     "routing_reasons": [],
@@ -277,13 +309,5 @@
       "gate_passed": true,
       "resubmit_recommended": false
     }
-  },
-  "adjuster_decision": {
-    "decision": "Approve",
-    "adjuster": "Raunak",
-    "reason": "Its fine",
-    "ai_decision": "Approve",
-    "overridden": false,
-    "timestamp": "2026-06-04 06:06"
   }
 }
