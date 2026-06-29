@@ -49,8 +49,38 @@ function ChartTooltip({ active, payload, label }) {
   )
 }
 
+const AGENT_LABELS = {
+  damage_assessment: 'Damage Assessment',
+  fraud_intelligence: 'Fraud Intelligence',
+  incident_reconstruction: 'Incident Reconstruction',
+  context_verification: 'Context Verification',
+  settlement_recommendation: 'Settlement Recommendation',
+}
+
+function CapBar({ label, used, cap }) {
+  const pct = cap > 0 ? Math.min(100, (used / cap) * 100) : 0
+  const nearLimit = cap > 0 && used / cap >= 0.8
+  return (
+    <div>
+      <div className="flex justify-between items-baseline mb-1">
+        <span className="text-xs text-slate-400">{label}</span>
+        <span className={`text-xs ${nearLimit ? 'text-amber-400' : 'text-slate-500'}`}>
+          {used.toLocaleString()} / {cap.toLocaleString()}
+        </span>
+      </div>
+      <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full ${nearLimit ? 'bg-amber-500' : 'bg-indigo-500'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
 export default function Analytics() {
   const [data, setData] = useState(null)
+  const [tokenData, setTokenData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -59,6 +89,9 @@ export default function Analytics() {
       .then(r => setData(r.data))
       .catch(() => setError('Could not load analytics. Make sure the backend is running.'))
       .finally(() => setLoading(false))
+    api.get('/analytics/tokens')
+      .then(r => setTokenData(r.data))
+      .catch(() => {})
   }, [])
 
   if (loading) {
@@ -427,6 +460,70 @@ export default function Analytics() {
           )}
         </Section>
       </div>
+
+      {/* ── Row 7: LLM Token Usage & Cost ── */}
+      {tokenData && (
+        <Section title="LLM Token Usage & Cost">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <div className="bg-slate-800/60 rounded-lg p-3 text-center">
+              <p className="text-lg font-bold text-white">{tokenData.total_calls.toLocaleString()}</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">Total LLM Calls</p>
+            </div>
+            <div className="bg-slate-800/60 rounded-lg p-3 text-center">
+              <p className="text-lg font-bold text-white">{tokenData.total_tokens.toLocaleString()}</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">Total Tokens</p>
+            </div>
+            <div className="bg-slate-800/60 rounded-lg p-3 text-center">
+              <p className="text-lg font-bold text-green-400">${(tokenData.total_cost_usd ?? 0).toFixed(4)}</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">Total Cost (USD)</p>
+            </div>
+            <div className="bg-slate-800/60 rounded-lg p-3 text-center">
+              <p className="text-lg font-bold text-white">{tokenData.today?.total_tokens?.toLocaleString() ?? 0}</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">Tokens Today</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+            <CapBar
+              label="Text calls today (Groq free-tier cap)"
+              used={tokenData.today?.text_calls ?? 0}
+              cap={tokenData.today?.text_calls_cap ?? 0}
+            />
+            <CapBar
+              label="Vision calls today (Groq free-tier cap)"
+              used={tokenData.today?.vision_calls ?? 0}
+              cap={tokenData.today?.vision_calls_cap ?? 0}
+            />
+          </div>
+
+          {Object.keys(tokenData.by_agent || {}).length === 0 ? (
+            <p className="text-slate-500 text-sm">No LLM calls logged yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-slate-500 uppercase tracking-wider text-[10px]">
+                    <th className="text-left pb-2">Agent</th>
+                    <th className="text-right pb-2">Calls</th>
+                    <th className="text-right pb-2">Tokens</th>
+                    <th className="text-right pb-2">Cost (USD)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(tokenData.by_agent).map(([agent, s]) => (
+                    <tr key={agent} className="border-t border-slate-800">
+                      <td className="py-2 text-slate-300">{AGENT_LABELS[agent] || agent}</td>
+                      <td className="py-2 text-right text-slate-400">{s.calls}</td>
+                      <td className="py-2 text-right text-slate-400">{s.total_tokens.toLocaleString()}</td>
+                      <td className="py-2 text-right text-green-400">${(s.cost_usd ?? 0).toFixed(4)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+      )}
     </div>
   )
 }

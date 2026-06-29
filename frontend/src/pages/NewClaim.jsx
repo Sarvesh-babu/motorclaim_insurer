@@ -76,6 +76,7 @@ export default function NewClaim() {
   const [firFiles, setFirFiles] = useState([])
   const [fir, setFir] = useState({ number: '' })
   const [dashcamFiles, setDashcamFiles] = useState([])
+  const [telematicsFiles, setTelematicsFiles] = useState([])
 
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -153,6 +154,14 @@ export default function NewClaim() {
         dashcamFiles.forEach(f => dashFd.append('files', f))
         dashFd.append('doc_type', 'dashcam')
         await api.post(`/claims/${claim.claim_id}/files`, dashFd)
+      }
+
+      // 6. Upload telematics/IoT data
+      if (telematicsFiles.length > 0) {
+        const telFd = new FormData()
+        telematicsFiles.forEach(f => telFd.append('files', f))
+        telFd.append('doc_type', 'telematics')
+        await api.post(`/claims/${claim.claim_id}/files`, telFd)
       }
 
       // Policyholder → confirmation page; adjudicator → straight to the dashboard
@@ -265,13 +274,14 @@ export default function NewClaim() {
                       <EvidenceTab
                         id="estimate"
                         label="Garage Estimate"
-                        badge={(estimateFiles.length > 0 || garage.amount) ? null : null}
+                        badge={(estimateFiles.length > 0 || garage.amount) ? '✓' : null}
                         active={evidenceTab === 'estimate'}
                         onClick={() => setEvidenceTab('estimate')}
                       />
                       <EvidenceTab
                         id="fir"
                         label="FIR Report"
+                        badge={firFiles.length > 0 ? firFiles.length : null}
                         active={evidenceTab === 'fir'}
                         onClick={() => setEvidenceTab('fir')}
                       />
@@ -281,6 +291,13 @@ export default function NewClaim() {
                         badge={dashcamFiles.length > 0 ? dashcamFiles.length : null}
                         active={evidenceTab === 'dashcam'}
                         onClick={() => setEvidenceTab('dashcam')}
+                      />
+                      <EvidenceTab
+                        id="telematics"
+                        label="Telematics / IoT"
+                        badge={telematicsFiles.length > 0 ? telematicsFiles.length : null}
+                        active={evidenceTab === 'telematics'}
+                        onClick={() => setEvidenceTab('telematics')}
                       />
                     </div>
                   </div>
@@ -398,6 +415,47 @@ export default function NewClaim() {
                           {dashcamFiles.length > 0 && (
                             <p className="text-xs text-green-400 mt-1.5">{dashcamFiles[0].name} selected</p>
                           )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tab 5: Telematics / IoT Data */}
+                    {evidenceTab === 'telematics' && (
+                      <div className="space-y-3">
+                        <p className="text-xs text-slate-500">
+                          Optional telematics/IoT box data (JSON or CSV) — GPS trail, speed, impact
+                          force and hard-braking signals are cross-checked against the claimed incident.
+                        </p>
+                        <div>
+                          <label className={label}>Upload Telematics File <span className="text-slate-500 font-normal">(.json or .csv)</span></label>
+                          <input
+                            type="file"
+                            accept=".json,.csv,application/json,text/csv"
+                            onChange={e => setTelematicsFiles(Array.from(e.target.files))}
+                            className={fileInput}
+                          />
+                          {telematicsFiles.length > 0 && (
+                            <p className="text-xs text-green-400 mt-1.5">{telematicsFiles[0].name} selected</p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-500 mb-1.5">Demo sample files (download, then upload above):</p>
+                          <div className="flex flex-wrap gap-2">
+                            {[
+                              { file: 'sample_genuine_collision.json', label: 'Genuine Collision' },
+                              { file: 'sample_fraud_mismatch.json', label: 'Fraud Mismatch' },
+                              { file: 'sample_partial_data.json', label: 'Partial Data' },
+                            ].map(s => (
+                              <a
+                                key={s.file}
+                                href={`/api/sample-telematics/${s.file}`}
+                                download
+                                className="text-xs px-2.5 py-1 rounded-full bg-slate-800 border border-slate-600 text-slate-300 hover:bg-slate-700 transition-colors"
+                              >
+                                {s.label}
+                              </a>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     )}

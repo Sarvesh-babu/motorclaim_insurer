@@ -208,6 +208,31 @@ def _bullet_list(pdf: ClaimPDF, items: list[str], color: tuple = C_DARK):
         pdf.multi_cell(0, 5.5, _s(item), new_x="LMARGIN", new_y="NEXT")
 
 
+def _kb_glossary_list(pdf: ClaimPDF, entries: list[dict], color: tuple = C_INDIGO):
+    """Render expanded KB entries ({code, type, title, description, relevance})
+    as: bold 'CODE — Title' header line, then indented description/relevance
+    in smaller muted text — so a reader sees what each code means and why it
+    was relevant to this claim, not just a bare code."""
+    for e in entries:
+        if not e:
+            continue
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(*color)
+        header = f"{e['code']} — {e['title']}" if e.get("code") else e["title"]
+        pdf.multi_cell(0, 5.5, _s(header), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 7.5)
+        pdf.set_text_color(*C_MUTED)
+        if e.get("description"):
+            pdf.set_x(pdf.get_x() + 4)
+            pdf.multi_cell(0, 4.5, _s(e["description"]), new_x="LMARGIN", new_y="NEXT")
+        if e.get("relevance"):
+            pdf.set_x(pdf.get_x() + 4)
+            pdf.set_font("Helvetica", "I", 7.5)
+            pdf.multi_cell(0, 4.5, _s("Why relevant here: " + e["relevance"]), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(*C_DARK)
+        pdf.ln(1)
+
+
 def _numbered_list(pdf: ClaimPDF, items: list[str]):
     for i, item in enumerate(items, 1):
         if not item:
@@ -486,21 +511,35 @@ def generate_claim_report(claim: dict, result: dict) -> bytes:
         pdf.cell(0, 5, f"Fraud Indicators Detected ({len(indicators)}):", new_x="LMARGIN", new_y="NEXT")
         _bullet_list(pdf, indicators, color=C_REJECT)
 
-    schemes = fraud.get("matched_schemes", [])
-    if schemes:
+    schemes_expanded = fraud.get("matched_schemes_expanded") or []
+    if schemes_expanded:
         pdf.ln(2)
         pdf.set_font("Helvetica", "B", 8)
         pdf.set_text_color(*C_REJECT)
         pdf.cell(0, 5, "Matched Fraud Schemes:", new_x="LMARGIN", new_y="NEXT")
         pdf.set_text_color(*C_DARK)
-        _bullet_list(pdf, schemes, color=C_REJECT)
+        _kb_glossary_list(pdf, schemes_expanded, color=C_REJECT)
+    elif fraud.get("matched_schemes"):
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(*C_REJECT)
+        pdf.cell(0, 5, "Matched Fraud Schemes:", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(*C_DARK)
+        _bullet_list(pdf, fraud["matched_schemes"], color=C_REJECT)
 
-    refs = fraud.get("kb_references", [])
-    if refs:
+    refs_expanded = fraud.get("kb_references_expanded") or []
+    if refs_expanded:
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(*C_MUTED)
+        pdf.cell(0, 5, "KB References:", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(*C_DARK)
+        _kb_glossary_list(pdf, refs_expanded, color=C_INDIGO)
+    elif fraud.get("kb_references"):
         pdf.ln(1)
         pdf.set_font("Helvetica", "", 7.5)
         pdf.set_text_color(*C_MUTED)
-        pdf.cell(0, 5, _s("KB References: " + "  |  ".join(refs[:10])), new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 5, _s("KB References: " + "  |  ".join(fraud["kb_references"][:10])), new_x="LMARGIN", new_y="NEXT")
         pdf.set_text_color(*C_DARK)
     pdf.ln(4)
 
@@ -657,10 +696,13 @@ def generate_claim_report(claim: dict, result: dict) -> bytes:
         pdf.ln(4)
 
     # ── KB precedents ─────────────────────────────────────────────────────────
-    precedents = settlement.get("kb_precedents_applied", [])
-    if precedents:
+    precedents_expanded = settlement.get("kb_precedents_applied_expanded") or []
+    if precedents_expanded:
         _section_header(pdf, "Knowledge Base Precedents Applied")
-        _bullet_list(pdf, precedents, color=C_INDIGO)
+        _kb_glossary_list(pdf, precedents_expanded, color=C_INDIGO)
+    elif settlement.get("kb_precedents_applied"):
+        _section_header(pdf, "Knowledge Base Precedents Applied")
+        _bullet_list(pdf, settlement["kb_precedents_applied"], color=C_INDIGO)
         pdf.ln(4)
 
     # ── Disclaimer ────────────────────────────────────────────────────────────

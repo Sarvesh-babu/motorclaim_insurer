@@ -106,12 +106,18 @@ export default function Dashboard() {
   const [apiError, setApiError] = useState('')
 
   const fetchResult = useCallback(() => {
+    // Re-fetch both the claim/result AND docs — investigation parses
+    // FIR/estimate/telematics and extracts dash-cam frames during the run,
+    // so the Documents tab needs fresh data too, not just the agent results.
     api.get(`/claims/${claimId}`)
       .then(r => {
         setClaim(r.data.claim)
         setResult(r.data.result)
         if (r.data.policy) setPolicy(r.data.policy)
       })
+      .catch(() => {})
+    api.get(`/claims/${claimId}/docs`)
+      .then(r => setClaimDocs(r.data))
       .catch(() => {})
   }, [claimId])
 

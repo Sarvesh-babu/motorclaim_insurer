@@ -134,4 +134,12 @@ class SettlementRecommendationAgent(BaseAgent):
         )
         result = ask_json(prompt, agent_name="settlement_recommendation", claim_id=claim.get("claim_id"))
         result.setdefault("status", "completed")
+
+        # Expand bare KB codes (HIST-xxx / FS-xxx / FI-xxx) into {title,
+        # description, relevance} — relevance reuses fraud_intelligence's own
+        # flagged-check details where the code matches, so it stays claim-specific.
+        from services.kb_glossary import expand_list
+        result["kb_precedents_applied_expanded"] = expand_list(
+            result.get("kb_precedents_applied"), fraud_data.get("fraud_checks")
+        )
         return result

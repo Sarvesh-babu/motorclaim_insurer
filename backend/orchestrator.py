@@ -65,6 +65,18 @@ async def run_pipeline(claim_id: str, claim: dict, queue: asyncio.Queue):
     except Exception:
         context["docs"]["dashcam_frames"] = []
 
+    # Video-side forensics — the same local AI-image detector damage_assessment
+    # runs on damage photos, run here on dashcam frames too, so fraud_intelligence
+    # has a video-based signal independent of incident_reconstruction's narrative
+    # (the two now run in parallel — see the agent loop below).
+    try:
+        from services import forensics_detector
+        context["docs"]["dashcam_forensics"] = forensics_detector.check_images(
+            context["docs"]["dashcam_frames"]
+        )
+    except Exception:
+        context["docs"]["dashcam_forensics"] = []
+
     try:
         from services.telematics_parser import parse_telematics, save_parsed_telematics
         telematics_paths = claim_docs.get("telematics", [])
@@ -87,7 +99,13 @@ async def run_pipeline(claim_id: str, claim: dict, queue: asyncio.Queue):
 
     flags = context["claim_type_flags"]
 
-    for agent_name, agent in agent_sequence:
+    async def run_one_agent(agent_name: str, agent) -> None:
+        """Runs a single agent, applies claim-type stubs, persists the result,
+        and emits its SSE events. Safe to run several of these concurrently via
+        asyncio.gather — each only writes to its own context["agents"][name] key
+        and storage.update_agent_result() does a single synchronous read-modify-
+        write with no `await` inside it, so there's no interleaving hazard even
+        though the underlying agent.run() calls execute in separate threads."""
         await queue.put({"type": "agent_start", "agent": agent_name})
         try:
             # ── Claim-type branching ───────────────────────────────────────────
@@ -145,6 +163,28 @@ async def run_pipeline(claim_id: str, claim: dict, queue: asyncio.Queue):
             context["agents"][agent_name] = error_data
             storage.update_agent_result(claim_id, agent_name, error_data)
             await queue.put({"type": "agent_error", "agent": agent_name, "error": str(exc)})
+
+    by_name = dict(agent_sequence)
+
+    # Phase 1: damage_assessment alone — fraud_intelligence and incident_reconstruction
+    # both only depend on its output, not on each other.
+    await run_one_agent("damage_assessment", by_name["damage_assessment"])
+
+    # Phase 2: fraud_intelligence and incident_reconstruction run IN PARALLEL.
+    # Fraud's image/video forensics layer is built from dedicated deterministic
+    # signals (vision authenticity flags, EXIF, the local AI-image detector run
+    # on both damage photos and dashcam frames) computed independently of
+    # incident_reconstruction's narrative — so neither agent needs to wait on
+    # the other's output.
+    await asyncio.gather(
+        run_one_agent("fraud_intelligence", by_name["fraud_intelligence"]),
+        run_one_agent("incident_reconstruction", by_name["incident_reconstruction"]),
+    )
+
+    # Phase 3: context_verification and settlement_recommendation — settlement
+    # needs both Phase 2 outputs, so this stays sequential.
+    await run_one_agent("context_verification", by_name["context_verification"])
+    await run_one_agent("settlement_recommendation", by_name["settlement_recommendation"])
 
     # Build summary from settlement agent output
     settlement     = context["agents"].get("settlement_recommendation", {})

@@ -103,12 +103,17 @@ FRAUD_CHECK_NAMES: dict[str, str] = {
     "FC-22": "Telematics GPS location",
     "FC-23": "Garage under-declaration",
     "FC-24": "Cross-claim garage inflation",
+    "FC-25": "Historical archive — garage fraud pattern",
+    "FC-26": "Historical archive — claimant fraud pattern",
+    "FC-27": "Historical archive — telematics fraud signature",
+    "FC-28": "Visual forensics — AI-generated/manipulated evidence (image or video)",
 }
 
 
-def _run_fraud_checks(claim: dict, damage: dict, docs: dict | None = None) -> list[dict]:
-    """Run all 24 deterministic fraud checks. Returns a list (in FC order) of
-    {id, name, status: pass|flag|na, detail} dicts."""
+def _run_fraud_checks(claim: dict, damage: dict, docs: dict | None = None) -> tuple[list[dict], dict]:
+    """Run all 28 deterministic fraud checks. Returns (checks, layers):
+    checks  — a list (in FC order) of {id, name, status: pass|flag|na, detail} dicts.
+    layers  — {"historical_fraud_layer": {...}, "visual_forensics_layer": {...}}."""
     docs = docs or {}
     damage = damage or {}
     results: dict[str, dict] = {}
@@ -489,6 +494,7 @@ def _run_fraud_checks(claim: dict, damage: dict, docs: dict | None = None) -> li
 
     # ── FC-21 / FC-22: Telematics/IoT cross-checks ─────────────────────────────
     telematics = docs.get("telematics")
+    gps_check: dict | None = None
     if not (telematics and telematics.get("parsed_ok")):
         emit("FC-21", "na", "No telematics data available.")
         emit("FC-22", "na", "No telematics data available.")
@@ -535,11 +541,47 @@ def _run_fraud_checks(claim: dict, damage: dict, docs: dict | None = None) -> li
     except Exception:
         emit("FC-24", "na", "Cross-claim garage history unavailable.")
 
+    # ── FC-25 / FC-26 / FC-27: Historical fraud archive cross-checks ───────────
+    # Distinct from FC-24 (which scans the LIVE operational queue): this archive
+    # is a standing knowledge base, so these checks still have history to
+    # compare against even when the live queue has just been reset/is empty.
+    from services.historical_fraud_intel import build_historical_fraud_layer
+    historical_layer = build_historical_fraud_layer(claim, telematics, gps_check)
+    emit("FC-25", historical_layer["garage_history"]["status"], historical_layer["garage_history"]["detail"])
+    emit("FC-26", historical_layer["claimant_history"]["status"], historical_layer["claimant_history"]["detail"])
+    emit("FC-27", historical_layer["telematics_history"]["status"], historical_layer["telematics_history"]["detail"])
+
+    # ── FC-28: Visual forensics — AI-generated/manipulated evidence ───────────
+    # Combines the image-side signal (vision LLM authenticity_flags + EXIF +
+    # local AI-image-detector, all already computed by damage_assessment) with
+    # the video-side signal (the same local detector run on dashcam frames).
+    img_auth = (damage.get("image_quality") or {}).get("authenticity") or {}
+    video_signals = docs.get("dashcam_forensics") or []
+    video_suspects = [s for s in video_signals if s.get("is_ai_generated_suspected")]
+    visual_forensics_layer = {
+        "image": img_auth,
+        "video": {"signals": video_signals, "suspect_count": len(video_suspects)},
+    }
+    image_suspect = bool(img_auth.get("review_recommended"))
+    if image_suspect or video_suspects:
+        parts = []
+        if image_suspect:
+            parts.append("damage photo(s) flagged by the vision model/EXIF/local detector")
+        if video_suspects:
+            parts.append(f"{len(video_suspects)} dashcam frame(s) flagged by the local AI-image detector")
+        emit("FC-28", "flag", "Visual forensics: " + "; ".join(parts) + " — possible synthetic/manipulated evidence.")
+    elif video_signals or img_auth:
+        emit("FC-28", "pass", "No AI-generated/manipulated signals detected in images or dashcam frames.")
+    else:
+        emit("FC-28", "na", "No images or dashcam frames available for visual forensics.")
+
     # Return in FC order, defaulting any unexpectedly-missing check to na
-    return [
+    checks = [
         results.get(cid, {"id": cid, "name": name, "status": "na", "detail": "Not evaluated."})
         for cid, name in FRAUD_CHECK_NAMES.items()
     ]
+    layers = {"historical_fraud_layer": historical_layer, "visual_forensics_layer": visual_forensics_layer}
+    return checks, layers
 
 
 class FraudIntelligenceAgent(BaseAgent):
@@ -547,7 +589,7 @@ class FraudIntelligenceAgent(BaseAgent):
         claim = context["claim"]
         damage = context["agents"].get("damage_assessment", {})
         docs = context.get("docs", {})
-        checks = _run_fraud_checks(claim, damage, docs)
+        checks, layers = _run_fraud_checks(claim, damage, docs)
         flags = [c["detail"] for c in checks if c["status"] == "flag"]
 
         # Build policy age hint for RAG query
@@ -575,15 +617,24 @@ class FraudIntelligenceAgent(BaseAgent):
             nps_low=NPS_LOW_DAYS,
         )
         # ── Deterministic base score from rule flags ──────────────────────────
-        # Each CRITICAL flag contributes 35 pts; each regular flag contributes
-        # 8 pts; NPS flags use their tier weights. The LLM may only move the
-        # final score within ±15 of this base — preventing run-to-run variance
-        # on identical evidence.
+        # Each CRITICAL flag contributes 35 pts; historical-archive matches (an
+        # exact prior-fraud-case hit on garage/claimant/telematics signature, or
+        # a synthetic-image detection) contribute 30 pts — strong corroborating
+        # evidence, just under CRITICAL; each regular flag contributes 8 pts;
+        # NPS flags use their tier weights. The LLM may only move the final
+        # score within ±15 of this base — preventing run-to-run variance on
+        # identical evidence.
+        _HIGH_WEIGHT_CHECKS = {"FC-25", "FC-26", "FC-27", "FC-28"}
         base_score = 0
-        for f in flags:
+        for c in checks:
+            if c["status"] != "flag":
+                continue
+            f = c["detail"]
             fu = f.upper()
             if "CRITICAL" in fu:
                 base_score += 35
+            elif c["id"] in _HIGH_WEIGHT_CHECKS:
+                base_score += 30
             elif "NEW POLICY SYNDROME — HIGH" in fu:
                 base_score += 30
             elif "NEW POLICY SYNDROME — MEDIUM" in fu:
@@ -635,12 +686,25 @@ class FraudIntelligenceAgent(BaseAgent):
                 and "NEW POLICY" not in ind.upper()
             ]
 
-        # Expose the full 24-check list for the UI Fraud Check List panel.
+        # Expose the full 28-check list for the UI Fraud Check List panel.
         result["fraud_checks"] = checks
         flagged = sum(1 for c in checks if c["status"] == "flag")
         passed  = sum(1 for c in checks if c["status"] == "pass")
         na      = sum(1 for c in checks if c["status"] == "na")
         result["fraud_check_counts"] = {"flagged": flagged, "passed": passed, "na": na}
+
+        # Two layered outputs: image/video forensics, and historical cross-claim
+        # fraud patterns (same garage / same claimant / same telematics signature
+        # seen in past fraud cases) — see services/historical_fraud_intel.py.
+        result["visual_forensics_layer"] = layers["visual_forensics_layer"]
+        result["historical_fraud_layer"] = layers["historical_fraud_layer"]
+
+        # Expand bare KB codes (FI-xxx / FS-xxx) into {title, description,
+        # relevance} so the PDF report and frontend don't show raw codes —
+        # relevance is pulled from this claim's own flagged checks where possible.
+        from services.kb_glossary import expand_list
+        result["kb_references_expanded"] = expand_list(result.get("kb_references"), checks)
+        result["matched_schemes_expanded"] = expand_list(result.get("matched_schemes"), checks)
 
         # Regenerate the summary from the Python-authoritative score and label so
         # the collapsed agent row never shows a stale LLM-generated figure. Pick

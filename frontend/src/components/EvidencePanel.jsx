@@ -17,14 +17,19 @@ function Tab({ label, active, onClick }) {
 }
 
 // ── KB Source Pill with hover tooltip ────────────────────────────────────────
-function KBPill({ text, color = 'indigo' }) {
+// Accepts either an expanded entry ({code, type, title, description, relevance})
+// or a legacy bare string, so older cached result.json data still renders.
+function KBPill({ entry, color = 'indigo' }) {
   const [open, setOpen] = useState(false)
   const colors = {
     indigo: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/25',
     amber:  'bg-amber-500/15  text-amber-300  border-amber-500/30  hover:bg-amber-500/25',
     green:  'bg-green-500/15  text-green-300  border-green-500/30  hover:bg-green-500/25',
   }
-  const label = text.split(' — ')[0] || text.slice(0, 60)
+  const isObj = typeof entry === 'object' && entry !== null
+  const code = isObj ? entry.code : null
+  const title = isObj ? entry.title : entry
+  const label = code ? `${code}` : (title || '').split(' — ')[0] || (title || '').slice(0, 60)
 
   return (
     <div className="relative inline-block">
@@ -37,7 +42,12 @@ function KBPill({ text, color = 'indigo' }) {
       </button>
       {open && (
         <div className="absolute z-20 bottom-full mb-2 left-0 w-80 bg-slate-800 border border-slate-600 rounded-xl p-3 shadow-xl text-xs text-slate-300 leading-relaxed">
-          {text}
+          <p className="font-semibold text-white mb-1">{title}</p>
+          {isObj && entry.description && <p className="mb-1.5">{entry.description}</p>}
+          {isObj && entry.relevance && (
+            <p className="text-indigo-300 italic">Why relevant here: {entry.relevance}</p>
+          )}
+          {!isObj && <p>{entry}</p>}
           <button
             onClick={() => setOpen(false)}
             className="absolute top-2 right-2 text-slate-500 hover:text-slate-300 text-xs"
@@ -49,9 +59,9 @@ function KBPill({ text, color = 'indigo' }) {
 }
 
 function KBSources({ settlement, fraudAgent }) {
-  const precedents  = settlement?.kb_precedents_applied   || []
-  const schemes     = fraudAgent?.matched_schemes          || []
-  const refs        = fraudAgent?.kb_references            || []
+  const precedents  = settlement?.kb_precedents_applied_expanded   || settlement?.kb_precedents_applied   || []
+  const schemes     = fraudAgent?.matched_schemes_expanded          || fraudAgent?.matched_schemes          || []
+  const refs        = fraudAgent?.kb_references_expanded            || fraudAgent?.kb_references            || []
   const all = [...precedents, ...schemes, ...refs]
   if (!all.length) return null
 
@@ -61,9 +71,9 @@ function KBSources({ settlement, fraudAgent }) {
         KB Sources Used
       </p>
       <div className="flex flex-wrap gap-2">
-        {precedents.map((t, i) => <KBPill key={`p${i}`} text={t} color="green" />)}
-        {schemes.map((t, i)    => <KBPill key={`s${i}`} text={t} color="amber" />)}
-        {refs.map((t, i)       => <KBPill key={`r${i}`} text={t} color="indigo" />)}
+        {precedents.map((t, i) => <KBPill key={`p${i}`} entry={t} color="green" />)}
+        {schemes.map((t, i)    => <KBPill key={`s${i}`} entry={t} color="amber" />)}
+        {refs.map((t, i)       => <KBPill key={`r${i}`} entry={t} color="indigo" />)}
       </div>
     </div>
   )
@@ -264,13 +274,20 @@ function DashCamCard({ fileUrls, frameUrls }) {
   )
 }
 
+function _telematicsForDisplay(parsed) {
+  if (!parsed) return parsed
+  const { gps_trail, ...rest } = parsed
+  return { ...rest, gps_points: gps_trail?.length || undefined }
+}
+
 function DocumentsTab({ claimDocs, agents }) {
   const parsed = claimDocs?.parsed || {}
   const files = claimDocs?.files || {}
   const dashcamFrames = claimDocs?.dashcam_frames || []
   const damage = agents?.damage_assessment
 
-  const hasAnything = parsed.estimate || parsed.fir || files.estimate?.length || files.fir?.length || files.dashcam?.length
+  const hasAnything = parsed.estimate || parsed.fir || files.estimate?.length || files.fir?.length
+    || files.dashcam?.length || files.telematics?.length
 
   if (claimDocs === undefined) {
     return <p className="text-slate-500 text-sm">Loading documents...</p>
@@ -303,6 +320,12 @@ function DocumentsTab({ claimDocs, agents }) {
           fileUrls={files.fir}
         />
         <DashCamCard fileUrls={files.dashcam} frameUrls={dashcamFrames} />
+        <DocCard
+          title="Telematics / IoT Data"
+          icon="📡"
+          parsed={_telematicsForDisplay(parsed.telematics)}
+          fileUrls={files.telematics}
+        />
       </div>
     </div>
   )
