@@ -3,9 +3,12 @@ import os
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 OPENWEATHERMAP_API_KEY = os.getenv("OPENWEATHERMAP_API_KEY", "")
+
+# Encryption at rest for PII fields (claimant, phone) in claims.csv/result.json.
+# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
 
 # Live spare-part price lookup (optional). Set either one to enable
 # "from-the-internet" pricing in the damage estimation engine.

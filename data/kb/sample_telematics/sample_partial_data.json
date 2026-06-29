@@ -1,0 +1,20 @@
+{
+  "_description": "GPS trail present but scalar sensor fields missing \u2014 simulates an older/partial telematics box. Tests the graceful partial-data path.",
+  "event_timestamp": null,
+  "speed_kmph_at_event": null,
+  "hard_braking_detected": null,
+  "impact_g_force": null,
+  "airbag_deployed": null,
+  "gps_trail": [
+    {
+      "lat": 12.951,
+      "lon": 80.2218,
+      "timestamp": "2026-06-01T20:05:10"
+    },
+    {
+      "lat": 12.966,
+      "lon": 80.2368,
+      "timestamp": "2026-06-01T20:06:40"
+    }
+  ]
+}

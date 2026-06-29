@@ -1,0 +1,25 @@
+{
+  "_description": "No hard-braking/impact event despite a claimed collision, and the GPS trail is nowhere near the claimed incident location \u2014 drives the Fraud Intelligence physics-mismatch + GPS-mismatch flags.",
+  "event_timestamp": "2026-06-01T20:07:42",
+  "speed_kmph_at_event": 18.0,
+  "hard_braking_detected": false,
+  "impact_g_force": 0.2,
+  "airbag_deployed": false,
+  "gps_trail": [
+    {
+      "lat": 19.076,
+      "lon": 72.8777,
+      "timestamp": "2026-06-01T20:06:50"
+    },
+    {
+      "lat": 19.0762,
+      "lon": 72.878,
+      "timestamp": "2026-06-01T20:07:20"
+    },
+    {
+      "lat": 19.0765,
+      "lon": 72.8783,
+      "timestamp": "2026-06-01T20:07:42"
+    }
+  ]
+}

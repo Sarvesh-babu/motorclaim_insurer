@@ -229,12 +229,48 @@ function DocCard({ title, icon, parsed, fileUrls }) {
   )
 }
 
+function DashCamCard({ fileUrls, frameUrls }) {
+  const hasFiles = fileUrls?.length > 0
+  if (!hasFiles) return null
+  const extracted = frameUrls?.length > 0
+
+  return (
+    <div className="bg-slate-800/60 rounded-xl border border-slate-700 p-4 mb-3">
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-base">🎥</span>
+          <h4 className="text-sm font-semibold text-white">Dash Cam Video</h4>
+        </div>
+        <span className={`text-xs px-2 py-0.5 rounded-full ${
+          extracted ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+        }`}>
+          {extracted ? `${frameUrls.length} frame${frameUrls.length > 1 ? 's' : ''} extracted` : 'Extraction failed'}
+        </span>
+      </div>
+
+      {extracted ? (
+        <div className="grid grid-cols-4 gap-2">
+          {frameUrls.map((url, i) => (
+            <img key={i} src={url} alt={`Dash cam frame ${i + 1}`}
+                 className="w-full h-16 object-cover rounded-lg border border-slate-700" />
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-red-400">
+          Video uploaded — frames could not be extracted (unsupported/corrupt file).
+        </p>
+      )}
+    </div>
+  )
+}
+
 function DocumentsTab({ claimDocs, agents }) {
   const parsed = claimDocs?.parsed || {}
   const files = claimDocs?.files || {}
+  const dashcamFrames = claimDocs?.dashcam_frames || []
   const damage = agents?.damage_assessment
 
-  const hasAnything = parsed.estimate || parsed.fir || files.estimate?.length || files.fir?.length
+  const hasAnything = parsed.estimate || parsed.fir || files.estimate?.length || files.fir?.length || files.dashcam?.length
 
   if (claimDocs === undefined) {
     return <p className="text-slate-500 text-sm">Loading documents...</p>
@@ -245,7 +281,7 @@ function DocumentsTab({ claimDocs, agents }) {
       <div className="text-center py-8">
         <p className="text-2xl mb-2">📂</p>
         <p className="text-slate-400 text-sm font-medium mb-1">No supporting documents</p>
-        <p className="text-slate-500 text-xs">Upload a garage estimate or FIR when filing a new claim to enable document cross-checks.</p>
+        <p className="text-slate-500 text-xs">Upload a garage estimate, FIR or dash-cam clip when filing a new claim to enable document cross-checks.</p>
       </div>
     )
   }
@@ -266,6 +302,7 @@ function DocumentsTab({ claimDocs, agents }) {
           parsed={parsed.fir}
           fileUrls={files.fir}
         />
+        <DashCamCard fileUrls={files.dashcam} frameUrls={dashcamFrames} />
       </div>
     </div>
   )

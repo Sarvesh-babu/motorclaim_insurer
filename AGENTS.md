@@ -68,7 +68,7 @@ Ideathon_Motor_Claim/
 │   │   ├── context_verification.py    ← Agent 4: geo + weather + policy_documents RAG
 │   │   └── settlement_recommendation.py ← Agent 5: all agents + all KB RAG
 │   └── services/
-│       ├── gemini_client.py           ← Groq SDK wrapper (legacy name kept); ask_text, ask_json, ask_with_images
+│       ├── llm_client.py              ← Groq SDK wrapper (formerly gemini_client.py); ask_text, ask_json, ask_with_images
 │       ├── rag_client.py             ← ChromaDB query service (graceful fallback if not built)
 │       ├── settlement_calc.py        ← deterministic IRDAI settlement breakdown (#2)
 │       └── letter_generator.py       ← auto-drafted customer decision letter (#7)
@@ -133,9 +133,9 @@ Ideathon_Motor_Claim/
 ### Claim ID format
 `CLM-{YYYY-MM}-{count:06d}` e.g. `CLM-2025-05-000001`
 
-### LLM Client (`backend/services/gemini_client.py`)
-> **The filename is a legacy artifact — the implementation uses the Groq SDK, not Gemini.**
-> All agents import `from services.gemini_client import ask_json` — do not rename the file.
+### LLM Client (`backend/services/llm_client.py`)
+> **Uses the Groq SDK, not Gemini.** (Formerly `gemini_client.py` — renamed to `llm_client.py`
+> once the last Gemini reference was gone; all agents import `from services.llm_client import ask_json`.)
 
 Uses the **Groq SDK** with two models:
 ```python

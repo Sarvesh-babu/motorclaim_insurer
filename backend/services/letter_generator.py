@@ -8,7 +8,7 @@ human decision (if recorded) takes precedence over the AI recommendation.
 
 from typing import Optional
 
-from services.gemini_client import ask_text
+from services.llm_client import ask_text
 
 
 def _effective_decision(result: dict) -> tuple[str, str]:
@@ -78,19 +78,19 @@ def draft_decision_letter(claim: dict, result: dict, policy: Optional[dict]) -> 
     reasons_str = "\n".join(f"- {r}" for r in reasons[:5])
 
     # Breakdown block
-    bd = summary.get("settlement_breakdown") or settlement_agent.get("settlement_breakdown")
+    bd = summary.get("settlement_breakdown") or settlement_agent.get("settlement_breakdown") or {}
     if bd and decision == "Approve":
         breakdown_str = (
-            f"Repair estimate {_inr(bd['repair_estimate'])} (GST included); "
-            f"less depreciation {_inr(bd['depreciation'])} ({bd['depreciation_pct']}%); "
-            f"less compulsory deductible {_inr(bd['compulsory_deductible'])}; "
-            f"net payable {_inr(bd['net_payable'])}."
+            f"Repair estimate {_inr(bd.get('repair_estimate'))} (GST included); "
+            f"less depreciation {_inr(bd.get('depreciation'))} ({bd.get('depreciation_pct', 0)}%); "
+            f"less compulsory deductible {_inr(bd.get('compulsory_deductible'))}; "
+            f"net payable {_inr(bd.get('net_payable'))}."
         )
     else:
         breakdown_str = "Not applicable for this decision."
 
     settlement_amt = (
-        _inr(bd["net_payable"]) if (bd and decision == "Approve")
+        _inr(bd.get("net_payable")) if (bd and decision == "Approve")
         else _inr(summary.get("recommended_settlement", 0))
     )
 

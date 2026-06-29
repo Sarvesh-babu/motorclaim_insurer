@@ -24,6 +24,18 @@ dist-ssr/
 # ── Generated data (rebuilt locally) ──────────────────────────────────────────
 data/vectorstore/
 data/price_cache.json
+data/token_usage.csv
+
+# ── Demo media supplied at demo time ──────────────────────────────────────────
+# The generated showcase fixtures (PDFs, telematics JSON, *_NEEDED.txt, README)
+# are committed; the real photos / dashcam clips dropped into test/ are not.
+test/**/*.jpg
+test/**/*.jpeg
+test/**/*.png
+test/**/*.webp
+test/**/*.mp4
+test/**/*.mov
+test/**/*.avi
 
 # ── Editor / OS ───────────────────────────────────────────────────────────────
 .vscode/*

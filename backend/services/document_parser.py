@@ -77,7 +77,7 @@ def parse_document(claim_id: str, file_path: str, doc_type: str, claim: dict) ->
     Writes parsed_estimate.json or parsed_fir.json under docs/.
     Returns the parsed dict.
     """
-    from services.gemini_client import ask_json
+    from services.llm_client import ask_json
 
     ext = os.path.splitext(file_path)[-1].lower().lstrip(".")
     temp_images: list[str] = []

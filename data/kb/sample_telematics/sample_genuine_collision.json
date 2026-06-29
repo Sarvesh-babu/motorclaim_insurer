@@ -1,0 +1,25 @@
+{
+  "_description": "Speed/braking/impact/GPS all consistent with a real collision at the claimed incident location (Perungudi, Chennai).",
+  "event_timestamp": "2026-06-01T20:07:42",
+  "speed_kmph_at_event": 42.5,
+  "hard_braking_detected": true,
+  "impact_g_force": 4.8,
+  "airbag_deployed": true,
+  "gps_trail": [
+    {
+      "lat": 12.961,
+      "lon": 80.23179999999999,
+      "timestamp": "2026-06-01T20:06:50"
+    },
+    {
+      "lat": 12.967,
+      "lon": 80.2378,
+      "timestamp": "2026-06-01T20:07:20"
+    },
+    {
+      "lat": 12.971,
+      "lon": 80.2418,
+      "timestamp": "2026-06-01T20:07:42"
+    }
+  ]
+}

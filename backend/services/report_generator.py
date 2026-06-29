@@ -595,6 +595,60 @@ def generate_claim_report(claim: dict, result: dict) -> bytes:
         _bullet_list(pdf, fb if fb else ["Insufficient data to generate plain-language reasons."], color=dec_rgb)
     pdf.ln(4)
 
+    # ── Settlement breakdown (IRDAI-aligned itemised math) ───────────────────
+    # Mirrors the SettlementBreakdown.jsx panel so the downloadable report
+    # reconciles the headline figure with visible line items. .get() throughout
+    # so a partial/missing breakdown can never raise.
+    bd = (summary.get("settlement_breakdown")
+          or settlement.get("settlement_breakdown") or {})
+    if bd:
+        _section_header(pdf, "Settlement Breakdown (IRDAI-aligned)")
+        cap = bd.get("inflation_cap_applied")
+        is_tl = bd.get("is_total_loss")
+
+        # Repair basis row — label reflects total-loss / inflation-cap state
+        if is_tl:
+            basis_label = "IDV (sum insured)"
+        elif cap:
+            basis_label = "AI Assessed Value (inflation cap applied)"
+        else:
+            basis_label = "Repair Estimate (garage)"
+        _kv_row(pdf, basis_label, _inr(bd.get("repair_estimate")), alt=True)
+
+        if cap:
+            _kv_row(pdf,
+                    "Garage quote (capped)",
+                    f"{_inr(bd.get('amount_claimed'))}  -  {_inr(bd.get('disallowed_inflation'))} disallowed (leakage prevented)")
+
+        if not is_tl:
+            _kv_row(pdf, f"Less: Depreciation ({_pct(bd.get('depreciation_pct'))})",
+                    f"- {_inr(bd.get('depreciation'))}", alt=True)
+        _kv_row(pdf, "Less: Compulsory deductible", f"- {_inr(bd.get('compulsory_deductible'))}")
+        if bd.get("voluntary_deductible"):
+            _kv_row(pdf, "Less: Voluntary deductible", f"- {_inr(bd.get('voluntary_deductible'))}", alt=True)
+        if bd.get("salvage_value"):
+            _kv_row(pdf, "Less: Salvage value", f"- {_inr(bd.get('salvage_value'))}")
+        if bd.get("gst_included"):
+            _kv_row(pdf, f"GST ({_pct(bd.get('gst_rate_pct'))}, incl. in repair total)",
+                    _inr(bd.get("gst_included")), alt=True)
+
+        # Net payable — emphasised in the decision colour
+        pdf.set_fill_color(*C_ROW_ALT)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*C_MUTED)
+        pdf.cell(42, 7, _s("NET PAYABLE"), fill=True)
+        pdf.set_text_color(*dec_rgb)
+        pdf.cell(144, 7, _s(_inr(bd.get("net_payable"))), fill=True, new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(*C_DARK)
+
+        if bd.get("ncb_advisory"):
+            pdf.ln(1)
+            pdf.set_font("Helvetica", "I", 7.5)
+            pdf.set_text_color(*C_ESCALATE)
+            pdf.multi_cell(0, 4.5, _s(f"NCB advisory: {bd.get('ncb_advisory')}"), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(*C_DARK)
+        pdf.ln(4)
+
     # ── Reasoning trail ──────────────────────────────────────────────────────
     trail = settlement.get("reasoning_trail", [])
     if trail:

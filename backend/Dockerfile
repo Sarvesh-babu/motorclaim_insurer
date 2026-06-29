@@ -19,14 +19,16 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # for 5-15 minutes before the investigation pipeline can proceed.
 RUN python -c "from chromadb.utils.embedding_functions import DefaultEmbeddingFunction; DefaultEmbeddingFunction(); print('ChromaDB ONNX model pre-downloaded OK')"
 
+# Pre-download the local AI-image-forensics ONNX classifier (LPX55/detection-model-1-ONNX,
+# ~90 MB) at build time for the same reason — avoids a slow first-request download
+# inside damage_assessment's image-quality gate.
+RUN python -c "from transformers import AutoImageProcessor; from optimum.onnxruntime import ORTModelForImageClassification; m='LPX55/detection-model-1-ONNX'; AutoImageProcessor.from_pretrained(m); ORTModelForImageClassification.from_pretrained(m); print('Forensics ONNX model pre-downloaded OK')"
+
 # Working dir mirrors the local layout so config.py's "../data" resolves to /app/data
 WORKDIR /app/backend
 
 # Copy backend source
 COPY backend/ /app/backend/
-
-# Copy scripts so users can run vectorstore build inside the container
-COPY scripts/ /app/scripts/
 
 # data/ is NOT baked in — it is bind-mounted at runtime (see docker-compose.yml)
 

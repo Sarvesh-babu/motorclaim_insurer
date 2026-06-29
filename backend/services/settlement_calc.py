@@ -136,14 +136,17 @@ _SOURCE_LABELS = {
 
 
 def _assess_repair(damage: dict) -> dict:
-    """Fair-value analysis: fraud/anomaly detection only.
+    """Fair-value analysis + anti-inflation cap.
 
     Compares the garage quoted amount against the AI's independently assessed
     fair value and produces a risk band + recommended action for the adjudicator.
 
-    THE ASSESSED FAIR VALUE NEVER AFFECTS THE PAYOUT. The garage quote is always
-    used as the approved repair basis. This function only supplies the audit fields
-    that appear in the Fair Value Analysis section of the UI.
+    PAYOUT IMPACT: the garage quote is used as the approved repair basis for the
+    "consistent" (±20%) and "review" (+20–40%) bands. For the "investigate" band
+    (garage quote >40% above the assessed fair value) the repair basis is CAPPED
+    at the AI assessed fair value, and the excess is surfaced as
+    `disallowed_inflation` (leakage prevented). `inflation_cap_applied` records
+    whether the cap fired.
     """
     est = damage.get("total_repair_estimate") or {}
     lo  = float(est.get("min") or 0) if isinstance(est, dict) else 0.0
@@ -172,6 +175,7 @@ def _assess_repair(damage: dict) -> dict:
         "overclaim_note":      None,
         "recommended_action":  None,
         "disallowed_inflation": 0,
+        "inflation_cap_applied": False,
     }
 
     # No independent assessment — use whatever figure is available as repair basis
@@ -192,7 +196,7 @@ def _assess_repair(damage: dict) -> dict:
 
     variance_pct = (claimed - assessed_mid) / assessed_mid * 100
 
-    # ── Risk band classification (fraud signal only, no payout effect) ─────────
+    # ── Risk band classification ───────────────────────────────────────────────
     if variance_pct > REVIEW_PCT:
         band = "investigate"
     elif variance_pct > CONSISTENT_RANGE:
@@ -200,35 +204,42 @@ def _assess_repair(damage: dict) -> dict:
     else:
         band = "consistent"   # covers ±20% (both above and below)
 
-    action = BAND_ACTIONS[band]
+    out["overclaim_pct"]        = round(variance_pct, 1)
+    out["overclaim_band"]       = band
+    out["recommended_action"]   = BAND_ACTIONS[band]
+    out["underclaim_advisory"]  = None
 
-    # Adjudicator notes per band
     if band == "consistent":
-        note = (
+        # Garage quote within ±20% — accepted in full as the repair basis.
+        out["approved_basis"]       = round(claimed)
+        out["disallowed_inflation"] = 0
+        out["inflation_cap_applied"] = False
+        out["overclaim_note"] = (
             f"Claimed ₹{claimed:,.0f} is within ±20% of the assessed fair value "
             f"of ₹{assessed_mid:,.0f} ({source_label}) — repair cost is consistent."
         )
     elif band == "review":
-        note = (
+        # +20%–40% — elevated but not capped; garage quote still the repair basis,
+        # surfaced to the adjudicator for line-item review.
+        out["approved_basis"]       = round(claimed)
+        out["disallowed_inflation"] = 0
+        out["inflation_cap_applied"] = False
+        out["overclaim_note"] = (
             f"Claimed ₹{claimed:,.0f} is {variance_pct:.1f}% above the assessed "
             f"fair value of ₹{assessed_mid:,.0f} — review required."
         )
-    else:  # investigate
-        note = (
-            f"Claimed ₹{claimed:,.0f} is {variance_pct:.1f}% above the assessed "
-            f"fair value of ₹{assessed_mid:,.0f} — significant variance, "
-            f"investigation required."
+    else:  # investigate — garage quote >40% above fair value → apply inflation cap
+        disallowed = max(round(claimed - assessed_mid), 0)
+        out["approved_basis"]        = round(assessed_mid)   # payout on AI fair value, not the inflated quote
+        out["disallowed_inflation"]  = disallowed
+        out["inflation_cap_applied"] = True
+        out["overclaim_note"] = (
+            f"Claimed ₹{claimed:,.0f} is {variance_pct:.1f}% above the assessed fair "
+            f"value of ₹{assessed_mid:,.0f} — exceeds the {REVIEW_PCT}% investigation "
+            f"threshold. Payout capped at the AI assessed fair value; "
+            f"₹{disallowed:,.0f} disallowed as inflation (leakage prevented)."
         )
 
-    # Repair basis is ALWAYS the garage quote — fair value is signal only
-    out["approved_basis"]    = round(claimed)
-    out["overclaim_pct"]     = round(variance_pct, 1)
-    out["overclaim_band"]    = band
-    out["overclaim_note"]    = note
-    out["recommended_action"] = action
-    out["disallowed_inflation"] = 0
-
-    out["underclaim_advisory"] = None
     return out
 
 
@@ -345,6 +356,11 @@ def compute_settlement_breakdown(
         f"Deductibles: ₹{total_ded:,} | Payout capped at IDV."
     )
 
+    # Inflation cap only carries meaning on the repair (non-total-loss) path —
+    # a total loss already settles on IDV, not the garage quote.
+    cap_applied = bool(assess.get("inflation_cap_applied")) and not is_total_loss
+    settlement_basis = "AI Assessed Fair Value (Inflation Cap)" if cap_applied else "Human Approved Amount"
+
     return {
         "is_total_loss":         is_total_loss,
         "total_loss_note":       total_loss_note,
@@ -359,9 +375,10 @@ def compute_settlement_breakdown(
         "overclaim_band":        assess.get("overclaim_band"),
         "overclaim_note":        assess.get("overclaim_note"),
         "recommended_action":    assess.get("recommended_action"),
-        "disallowed_inflation":  0,
+        "disallowed_inflation":  assess.get("disallowed_inflation") or 0,
+        "inflation_cap_applied": cap_applied,
         "underclaim_advisory":   assess.get("underclaim_advisory"),
-        "settlement_basis":      "Human Approved Amount",
+        "settlement_basis":      settlement_basis,
         # Depreciation
         "vehicle_age_years":     round(age, 1) if age is not None else None,
         "depreciation_pct":      0 if is_total_loss else age_dep,

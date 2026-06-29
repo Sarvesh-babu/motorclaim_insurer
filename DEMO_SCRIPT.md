@@ -106,7 +106,7 @@ Point to the **KB Grounded badge** (top-right of Investigation Pipeline):
 Diagram talking points:
 - **ChromaDB** — local vector DB, similarity search per agent
 - **ONNX all-MiniLM-L6-v2** — local embedding, no API rate limits
-- **Gemini 2.0 Flash** — only used for reasoning + vision analysis, not embedding
+- **Groq (Llama 3.3 70B + Llama 4 Scout vision)** — only used for reasoning + vision analysis, not embedding
 - **Graceful fallback** — agents still work if KB not built
 
 ---
@@ -129,14 +129,14 @@ Diagram talking points:
 **"How does the RAG KB stay up to date?"**
 > "Run `python scripts/build_vectorstore.py` to re-index. New fraud cases, updated pricing, new schemes — all hot-swappable without changing agent code."
 
-**"What if Gemini API is down?"**
-> "Agents have a graceful fallback. The KB queries are local and always work. Gemini is only needed for the reasoning step."
+**"What if Groq API is down?"**
+> "Agents have a graceful fallback. The KB queries are local and always work. Groq is only needed for the reasoning step."
 
 **"How accurate is the fraud scoring?"**
 > "Scoring thresholds are IRDAI-aligned: 0-30 Low, 31-59 Medium, 60-79 High, 80-100 Critical. The KB indicators each carry a calibrated risk weight from real insurance industry guidelines."
 
 **"Can it handle real claim photos?"**
-> "Yes — Gemini Vision analyzes uploaded images. The damage bounding boxes and severity assessments in the demo are from real vision analysis."
+> "Yes — Groq's Llama 4 Scout vision model analyzes uploaded images. The damage bounding boxes and severity assessments in the demo are from real vision analysis."
 
 ---
 
@@ -156,6 +156,6 @@ Diagram talking points:
 ## Emergency Fallbacks
 
 - **Backend won't start:** `cd backend && ..\venv\Scripts\python -m uvicorn main:app --port 8000`
-- **No internet (Gemini down):** Pre-seeded claims still show full results — use those for the demo
+- **No internet (Groq down):** Pre-seeded claims still show full results — use those for the demo
 - **KB badge shows red:** `python scripts/build_vectorstore.py` (takes ~30s, local ONNX)
 - **Frontend blank:** Hard refresh, check Vite proxy is running on port 5173

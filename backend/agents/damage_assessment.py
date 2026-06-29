@@ -1,9 +1,12 @@
 import re
 from typing import Any
 
+from PIL import Image, ExifTags
+
 import storage
 from agents.base_agent import BaseAgent
-from services.gemini_client import ask_json
+from services import forensics_detector
+from services.llm_client import ask_json
 from services.rag_client import get_vehicle_pricing_context
 
 
@@ -37,9 +40,25 @@ Number of images provided: {{image_count}}
 - If you are NOT sure whether something is real damage or just one of the artefacts above → do NOT report it.
 - It is far worse to invent damage that is not there than to miss a tiny scratch. WHEN IN DOUBT, LEAVE IT OUT.
 
+━━━ PHOTO AUTHENTICITY (read before assessing damage) ━━━
+- Before assessing damage, judge whether each image looks like a REAL photo of a physical vehicle taken
+  with a camera/phone, as opposed to AI-generated, a stock/marketing photo, or a photo of a screen/printout.
+- Signs of AI-generation: unnaturally smooth or plastic-looking surfaces, inconsistent or impossible
+  shadows/reflections, warped or nonsensical text on plates/badges, asymmetric or melted-looking parts,
+  an unnaturally "perfect" studio background for a claimed roadside/accident scene.
+- Signs of a stock/marketing photo: pristine showroom lighting, watermarks/logos, generic empty backdrop,
+  composition that looks like an advertisement rather than a casual damage photo.
+- Signs of a screenshot/photo-of-a-screen: visible screen bezels, moiré pattern, glare from a display,
+  UI elements (browser chrome, app icons) visible in frame.
+- Only raise a flag when you see a CONCRETE visual tell — do not flag an image merely for being
+  well-lit or high quality. A genuine clear phone photo is not suspicious by itself.
+
 ━━━ BOUNDING BOX RULES (read carefully) ━━━
 - Coordinates are PERCENTAGE-BASED: x,y = top-left corner (0–100%), w,h = width/height (0–100%)
 - image_index is 0-based: 0 = first image, 1 = second image, etc.
+- Each image is preceded by a text label "[Image 0]", "[Image 1]", … — set
+  "image_index" to the number on the label of the image the damage appears in.
+  Damage seen in the second image MUST use "image_index": 1, not 0.
 - The box MUST tightly enclose only the damaged region — NOT the whole vehicle or whole panel
 - x + w ≤ 100 and y + h ≤ 100 at all times; w and h must each be at least 5
 - A tight box for a bumper in the lower-left would be: {{"image_index": 0, "x": 5, "y": 62, "w": 38, "h": 22}}
@@ -102,6 +121,8 @@ Return a JSON object with exactly these fields:
   "pre_existing_damage_notes": null,
   "multiple_vehicles_in_frame": false,
   "image_quality_flags": ["any of: blurry, too_dark, overexposed, too_far, partial_view, low_resolution — or 'none' if photos are clear and usable"],
+  "authenticity_flags": ["any of: ai_generated_suspected, stock_photo_suspected, manipulated_suspected, screenshot_suspected — or 'none' if photos look like genuine camera photos"],
+  "authenticity_notes": "brief reason for any authenticity flag raised, or null if none",
   "status": "completed",
   "summary": "Severity: X | Est. Repair: ₹X–₹X | Parts: N damaged | Vehicle Match: Yes/No/Unclear"
 }}
@@ -126,7 +147,8 @@ class DamageAssessmentAgent(BaseAgent):
             description=claim.get("description", ""),
             vehicle=vehicle,
         )
-        result = ask_json(prompt, image_paths if image_paths else None)
+        result = ask_json(prompt, image_paths if image_paths else None,
+                          agent_name="damage_assessment", claim_id=claim["claim_id"])
         result.setdefault("status", "completed")
 
         # ── Plate verification ────────────────────────────────────────────────
@@ -232,8 +254,13 @@ class DamageAssessmentAgent(BaseAgent):
 
         # ── Image quality gate (#6 — data quality) ────────────────────────────
         # Combine deterministic checks (photo count, plate legibility) with the
-        # vision model's own quality flags (blur, darkness, framing).
-        result["image_quality"] = self._image_quality_gate(result, image_count)
+        # vision model's own quality flags (blur, darkness, framing), EXIF
+        # metadata, and a dedicated local forensics classifier — three
+        # independent authenticity opinions are harder to fool than one.
+        exif_signals = self._exif_authenticity_check(image_paths)
+        forensics_signals = forensics_detector.check_images(image_paths)
+        result["image_quality"] = self._image_quality_gate(
+            result, image_count, exif_signals, forensics_signals)
 
         return result
 
@@ -287,7 +314,40 @@ class DamageAssessmentAgent(BaseAgent):
             )
 
     @staticmethod
-    def _image_quality_gate(result: dict, photo_count: int) -> dict:
+    def _exif_authenticity_check(image_paths: list[str]) -> list[dict]:
+        """Inspect EXIF metadata per image as a soft authenticity signal.
+
+        Genuine phone/camera photos almost always carry SOME EXIF data (camera
+        make/model, capture timestamp). AI-generated images and many downloaded
+        stock photos carry none at all. A screenshot or a re-saved/edited photo
+        can also strip EXIF, so an empty result is a SOFT signal, not proof —
+        it's combined with the vision model's own authenticity_flags, never
+        used alone to block a claim.
+        """
+        signals = []
+        for path in image_paths:
+            entry = {"file": path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1],
+                      "has_exif": False, "has_camera_model": False,
+                      "has_capture_timestamp": False, "has_gps": False}
+            try:
+                with Image.open(path) as img:
+                    exif = img.getexif()
+                    if exif:
+                        entry["has_exif"] = True
+                        tags = {ExifTags.TAGS.get(k, k): v for k, v in exif.items()}
+                        entry["has_camera_model"] = bool(tags.get("Model"))
+                        entry["has_capture_timestamp"] = bool(
+                            tags.get("DateTime") or tags.get("DateTimeOriginal")
+                        )
+                        entry["has_gps"] = bool(exif.get_ifd(0x8825)) if hasattr(exif, "get_ifd") else False
+            except Exception:
+                pass
+            signals.append(entry)
+        return signals
+
+    @staticmethod
+    def _image_quality_gate(result: dict, photo_count: int, exif_signals: list[dict] | None = None,
+                             forensics_signals: list[dict] | None = None) -> dict:
         issues: list[str] = []
         blocking = False  # blocking issues should hold the claim for resubmission
 
@@ -324,10 +384,69 @@ class DamageAssessmentAgent(BaseAgent):
         if seen_blocking_visual and photo_count > 0:
             blocking = True
 
+        # ── Photo authenticity (AI-generated / stock / manipulated images) ────
+        _AUTH_LABELS = {
+            "ai_generated_suspected": "Photo may be AI-generated",
+            "stock_photo_suspected":  "Photo may be a stock/marketing image, not a genuine damage photo",
+            "manipulated_suspected":  "Photo may have been digitally manipulated",
+            "screenshot_suspected":   "Photo appears to be a screenshot/photo-of-a-screen, not a direct camera photo",
+        }
+        auth_flags_raw = result.get("authenticity_flags") or []
+        if isinstance(auth_flags_raw, str):
+            auth_flags_raw = [auth_flags_raw]
+        auth_flags = [str(f).strip().lower() for f in auth_flags_raw
+                      if str(f).strip().lower() not in ("", "none")]
+
+        exif_signals = exif_signals or []
+        exif_suspect_count = sum(1 for s in exif_signals if not s.get("has_exif"))
+        exif_signal_summary = (
+            f"{exif_suspect_count}/{len(exif_signals)} photo(s) have no EXIF metadata "
+            f"(camera/timestamp data) — common in AI-generated or downloaded images"
+        ) if exif_signals and exif_suspect_count > 0 else None
+
+        review_recommended = bool(auth_flags) or (
+            exif_signals and exif_suspect_count == len(exif_signals)
+        )
+
+        # Local forensics classifier (dedicated AI-image-detector model, run
+        # on-device) — a third, independent authenticity opinion alongside
+        # the vision LLM's judgment and the EXIF metadata check above.
+        forensics_signals = forensics_signals or []
+        forensics_suspects = [s for s in forensics_signals if s.get("is_ai_generated_suspected")]
+        forensics_summary = (
+            f"Local forensics model flagged {len(forensics_suspects)}/{len(forensics_signals)} "
+            f"photo(s) as likely AI-generated (confidence "
+            f"{max((s['confidence'] for s in forensics_suspects), default=0):.0%})"
+        ) if forensics_suspects else None
+
+        if forensics_suspects:
+            review_recommended = True
+
+        if auth_flags:
+            for key in auth_flags:
+                issues.append(_AUTH_LABELS.get(key, f"Authenticity concern: {key}"))
+            blocking = True
+        elif exif_signal_summary and exif_suspect_count == len(exif_signals):
+            # ALL photos missing EXIF is a stronger signal than a mix (mixed is
+            # normal — apps/messaging often strip EXIF from some transfers).
+            issues.append(exif_signal_summary)
+            blocking = True
+
+        if forensics_summary:
+            issues.append(forensics_summary)
+            blocking = True
+
         return {
             "photo_count":          photo_count,
             "plate_visible":        bool(result.get("registration_plate_visible")),
             "issues":               issues,
             "gate_passed":          not blocking,
-            "resubmit_recommended": blocking,
+            "resubmit_recommended": blocking and not review_recommended,
+            "authenticity": {
+                "flags":             auth_flags or ["none"],
+                "notes":             result.get("authenticity_notes"),
+                "exif_signals":      exif_signals,
+                "forensics_signals": forensics_signals,
+                "review_recommended": review_recommended,
+            },
         }

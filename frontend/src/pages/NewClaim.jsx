@@ -75,6 +75,7 @@ export default function NewClaim() {
   const [garage, setGarage] = useState({ amount: '', workshop_name: '' })
   const [firFiles, setFirFiles] = useState([])
   const [fir, setFir] = useState({ number: '' })
+  const [dashcamFiles, setDashcamFiles] = useState([])
 
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -144,6 +145,14 @@ export default function NewClaim() {
         firFiles.forEach(f => firFd.append('files', f))
         firFd.append('doc_type', 'fir')
         await api.post(`/claims/${claim.claim_id}/files`, firFd)
+      }
+
+      // 5. Upload dash-cam video
+      if (dashcamFiles.length > 0) {
+        const dashFd = new FormData()
+        dashcamFiles.forEach(f => dashFd.append('files', f))
+        dashFd.append('doc_type', 'dashcam')
+        await api.post(`/claims/${claim.claim_id}/files`, dashFd)
       }
 
       // Policyholder → confirmation page; adjudicator → straight to the dashboard
@@ -266,6 +275,13 @@ export default function NewClaim() {
                         active={evidenceTab === 'fir'}
                         onClick={() => setEvidenceTab('fir')}
                       />
+                      <EvidenceTab
+                        id="dashcam"
+                        label="Dash Cam Video"
+                        badge={dashcamFiles.length > 0 ? dashcamFiles.length : null}
+                        active={evidenceTab === 'dashcam'}
+                        onClick={() => setEvidenceTab('dashcam')}
+                      />
                     </div>
                   </div>
 
@@ -359,6 +375,28 @@ export default function NewClaim() {
                           />
                           {firFiles.length > 0 && (
                             <p className="text-xs text-green-400 mt-1.5">{firFiles[0].name} selected</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tab 4: Dash Cam Video */}
+                    {evidenceTab === 'dashcam' && (
+                      <div className="space-y-3">
+                        <p className="text-xs text-slate-500">
+                          Optional dash-cam footage of the incident. A few evenly-spaced frames are
+                          extracted and analyzed alongside the damage photos for incident reconstruction.
+                        </p>
+                        <div>
+                          <label className={label}>Upload Dash Cam Clip <span className="text-slate-500 font-normal">(.mp4 recommended)</span></label>
+                          <input
+                            type="file"
+                            accept="video/*"
+                            onChange={e => setDashcamFiles(Array.from(e.target.files))}
+                            className={fileInput}
+                          />
+                          {dashcamFiles.length > 0 && (
+                            <p className="text-xs text-green-400 mt-1.5">{dashcamFiles[0].name} selected</p>
                           )}
                         </div>
                       </div>

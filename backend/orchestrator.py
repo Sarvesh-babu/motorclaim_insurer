@@ -53,6 +53,30 @@ async def run_pipeline(claim_id: str, claim: dict, queue: asyncio.Queue):
     except Exception:
         context["docs"] = {"estimate": None, "fir": None}
 
+    # Dash cam video → frame extraction (Groq vision has no video input type,
+    # so a clip is converted to still frames that flow through the existing
+    # image pipeline) and telematics/IoT data parsing — both optional evidence.
+    try:
+        from services.video_parser import extract_frames
+        dashcam_paths = claim_docs.get("dashcam", [])
+        context["docs"]["dashcam_frames"] = (
+            extract_frames(claim_id, dashcam_paths[0]) if dashcam_paths else []
+        )
+    except Exception:
+        context["docs"]["dashcam_frames"] = []
+
+    try:
+        from services.telematics_parser import parse_telematics, save_parsed_telematics
+        telematics_paths = claim_docs.get("telematics", [])
+        if telematics_paths:
+            telematics_result = parse_telematics(telematics_paths[0])
+            save_parsed_telematics(claim_id, telematics_result)
+        else:
+            telematics_result = None
+        context["docs"]["telematics"] = telematics_result
+    except Exception:
+        context["docs"]["telematics"] = None
+
     storage.update_claim_field(claim_id, "status", "Under Investigation")
     # Clear any previous adjuster decision so a re-investigation starts clean.
     # Notes are preserved (they remain useful context for the new adjudicator).

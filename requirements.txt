@@ -2,9 +2,10 @@ fastapi
 uvicorn[standard]
 python-multipart
 httpx
-google-genai
 groq
 pillow
+cryptography
+opencv-python-headless
 python-dotenv
 sse-starlette
 
@@ -12,3 +13,7 @@ sse-starlette
 chromadb
 fpdf2
 PyMuPDF
+
+# Local forensics — AI-generated image detection (ONNX, no torch required)
+transformers
+optimum[onnxruntime]

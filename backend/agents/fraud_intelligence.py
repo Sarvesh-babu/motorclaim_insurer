@@ -4,7 +4,8 @@ from datetime import datetime
 import storage
 from agents.base_agent import BaseAgent
 from config import NPS_HIGH_DAYS, NPS_LOW_DAYS, NPS_MEDIUM_DAYS, SURVEYOR_THRESHOLD
-from services.gemini_client import ask_json
+from services.llm_client import ask_json
+from services.pii import build_llm_safe_claim
 from services.rag_client import get_fraud_kb_context
 
 BASE_PROMPT = """You are a senior motor insurance fraud analyst with access to an institutional fraud knowledge base.
@@ -73,105 +74,163 @@ def _policy_age_days(claim: dict) -> int:
         return -1
 
 
-def _rule_based_flags(claim: dict, damage: dict, docs: dict | None = None) -> list[str]:
-    flags = []
+# ── 24-check catalog ──────────────────────────────────────────────────────────
+# The Fraud Intelligence agent runs 24 deterministic checks (FC-01…FC-24). Each
+# is recorded as pass / flag / na. Only "flag" results feed the score and the
+# LLM prompt; pass/na are surfaced in the UI Fraud Check List for transparency.
+FRAUD_CHECK_NAMES: dict[str, str] = {
+    "FC-01": "High-value / total-loss threshold",
+    "FC-02": "Prior claims on policy (serial claimant)",
+    "FC-03": "Policy validity at incident date",
+    "FC-04": "New policy syndrome",
+    "FC-05": "Reporting delay",
+    "FC-06": "Night-time incident window",
+    "FC-07": "Description language red flags",
+    "FC-08": "Repeat-location pattern",
+    "FC-09": "Claim clustering (30 days)",
+    "FC-10": "Duplicate description",
+    "FC-11": "Claim-to-sum-insured ratio",
+    "FC-12": "Damage present in photos",
+    "FC-13": "Vehicle identity match",
+    "FC-14": "Pre-existing damage",
+    "FC-15": "Registration plate verification",
+    "FC-16": "Multiple vehicles in frame",
+    "FC-17": "Workshop inflation (this claim)",
+    "FC-18": "FIR present for theft / third-party",
+    "FC-19": "Estimate uploaded without photos",
+    "FC-20": "FIR consistency cross-check",
+    "FC-21": "Telematics impact corroboration",
+    "FC-22": "Telematics GPS location",
+    "FC-23": "Garage under-declaration",
+    "FC-24": "Cross-claim garage inflation",
+}
 
-    # ── Flag 1: Claim amount unusually high ───────────────────────────────────
-    try:
-        amount = float(claim.get("claim_amount", 0))
-        if amount > 500000:
-            flags.append(f"Claim amount ₹{amount:,.0f} exceeds ₹5,00,000 — potential total loss territory")
-        elif amount > SURVEYOR_THRESHOLD:
-            flags.append(
-                f"Claim amount ₹{amount:,.0f} exceeds ₹{SURVEYOR_THRESHOLD:,} "
-                f"— mandatory surveyor required (IRDAI)"
-            )
-    except (ValueError, TypeError):
-        pass
 
-    # ── Flag 2: Prior claims on same policy ───────────────────────────────────
+def _run_fraud_checks(claim: dict, damage: dict, docs: dict | None = None) -> list[dict]:
+    """Run all 24 deterministic fraud checks. Returns a list (in FC order) of
+    {id, name, status: pass|flag|na, detail} dicts."""
+    docs = docs or {}
+    damage = damage or {}
+    results: dict[str, dict] = {}
+
+    def emit(cid: str, status: str, detail: str = ""):
+        results[cid] = {"id": cid, "name": FRAUD_CHECK_NAMES[cid], "status": status, "detail": detail}
+
+    # ── Shared precomputed values ─────────────────────────────────────────────
+    claim_id = claim.get("claim_id", "")
+    claim_type = (claim.get("claim_type") or "").lower()
+    is_theft = "theft" in claim_type
+    is_tp = "third party" in claim_type or "third-party" in claim_type
+    desc_lower = (claim.get("description") or "").lower()
+    incident_date = claim.get("incident_date", "")
+    created_at = claim.get("created_at", "")
+    policy = storage.get_policy_by_phone(claim.get("phone", ""))
+    photos_present = bool(storage.get_claim_images(claim_id)) if claim_id else False
+
     all_claims = storage.get_all_claims()
     same_policy = [
         c for c in all_claims
         if c.get("policy_no") == claim.get("policy_no")
-        and c.get("claim_id") != claim.get("claim_id")
+        and c.get("claim_id") != claim_id
     ]
-    if len(same_policy) == 1:
-        flags.append("Policy has 1 prior claim — elevated frequency (FI-CLM-001)")
-    elif len(same_policy) >= 2:
-        flags.append(f"Policy has {len(same_policy)} prior claims — serial claimant pattern (FI-CLM-001)")
 
-    # ── Flag 3a: Policy expired before incident (eligibility failure) ─────────
+    # ── FC-01: High-value / total-loss threshold ──────────────────────────────
     try:
-        policy = storage.get_policy_by_phone(claim.get("phone", ""))
-        if policy:
-            end_str = policy.get("policy_end", "")
-            incident_str = claim.get("incident_date", "")
-            if end_str and incident_str:
-                policy_end = datetime.strptime(end_str[:10], "%Y-%m-%d").date()
-                incident_d = datetime.strptime(incident_str[:10], "%Y-%m-%d").date()
-                if incident_d > policy_end:
-                    days_lapsed = (incident_d - policy_end).days
-                    flags.append(
-                        f"CRITICAL: Incident date ({incident_str[:10]}) is {days_lapsed} day(s) AFTER "
-                        f"policy expiry ({end_str[:10]}) — claim is NOT eligible for coverage (FI-POL-003)"
-                    )
-    except Exception:
-        pass
+        amount = float(claim.get("claim_amount") or 0)
+        if amount <= 0:
+            emit("FC-01", "na", "Claim amount not yet assessed.")
+        elif amount > 500000:
+            emit("FC-01", "flag", f"Claim amount ₹{amount:,.0f} exceeds ₹5,00,000 — potential total loss territory")
+        elif amount > SURVEYOR_THRESHOLD:
+            emit("FC-01", "flag",
+                 f"Claim amount ₹{amount:,.0f} exceeds ₹{SURVEYOR_THRESHOLD:,} — mandatory surveyor required (IRDAI)")
+        else:
+            emit("FC-01", "pass", f"Claim amount ₹{amount:,.0f} within standard processing range.")
+    except (ValueError, TypeError):
+        emit("FC-01", "na", "Claim amount not parseable.")
 
-    # ── Flag 3b: New Policy Syndrome — tiered risk levels ─────────────────────
+    # ── FC-02: Prior claims on same policy ─────────────────────────────────────
+    n_prior = len(same_policy)
+    if n_prior == 0:
+        emit("FC-02", "pass", "No prior claims on this policy.")
+    elif n_prior == 1:
+        emit("FC-02", "flag", "Policy has 1 prior claim — elevated frequency (FI-CLM-001)")
+    else:
+        emit("FC-02", "flag", f"Policy has {n_prior} prior claims — serial claimant pattern (FI-CLM-001)")
+
+    # ── FC-03: Policy validity at incident date ────────────────────────────────
+    if policy and policy.get("policy_end") and incident_date:
+        try:
+            policy_end = datetime.strptime(policy["policy_end"][:10], "%Y-%m-%d").date()
+            incident_d = datetime.strptime(incident_date[:10], "%Y-%m-%d").date()
+            if incident_d > policy_end:
+                days_lapsed = (incident_d - policy_end).days
+                emit("FC-03", "flag",
+                     f"CRITICAL: Incident date ({incident_date[:10]}) is {days_lapsed} day(s) AFTER "
+                     f"policy expiry ({policy['policy_end'][:10]}) — claim is NOT eligible for coverage (FI-POL-003)")
+            else:
+                emit("FC-03", "pass", "Incident date falls within the active policy period.")
+        except Exception:
+            emit("FC-03", "na", "Policy period dates not parseable.")
+    else:
+        emit("FC-03", "na", "Policy period unavailable.")
+
+    # ── FC-04: New Policy Syndrome — tiered risk levels ────────────────────────
     age_days = _policy_age_days(claim)
-    if 0 <= age_days <= NPS_HIGH_DAYS:
-        flags.append(
-            f"NEW POLICY SYNDROME — HIGH RISK: Policy issued only {age_days} day(s) before "
-            f"the incident (threshold: 0–{NPS_HIGH_DAYS} days). Strong indicator of "
-            f"pre-existing damage fraud (FI-POL-001 / FS-001)."
-        )
+    if age_days < 0:
+        emit("FC-04", "na", "Policy start date unavailable.")
+    elif 0 <= age_days <= NPS_HIGH_DAYS:
+        emit("FC-04", "flag",
+             f"NEW POLICY SYNDROME — HIGH RISK: Policy issued only {age_days} day(s) before "
+             f"the incident (threshold: 0–{NPS_HIGH_DAYS} days). Strong indicator of "
+             f"pre-existing damage fraud (FI-POL-001 / FS-001).")
     elif age_days <= NPS_MEDIUM_DAYS:
-        flags.append(
-            f"NEW POLICY SYNDROME — MEDIUM RISK: Policy is {age_days} days old at incident "
-            f"(threshold: {NPS_HIGH_DAYS + 1}–{NPS_MEDIUM_DAYS} days). Elevated scrutiny "
-            f"required (FI-POL-001)."
-        )
+        emit("FC-04", "flag",
+             f"NEW POLICY SYNDROME — MEDIUM RISK: Policy is {age_days} days old at incident "
+             f"(threshold: {NPS_HIGH_DAYS + 1}–{NPS_MEDIUM_DAYS} days). Elevated scrutiny "
+             f"required (FI-POL-001).")
     elif age_days <= NPS_LOW_DAYS:
-        flags.append(
-            f"NEW POLICY SYNDROME — LOW RISK: Policy is {age_days} days old at incident "
-            f"(threshold: {NPS_MEDIUM_DAYS + 1}–{NPS_LOW_DAYS} days). Minor elevated risk; "
-            f"verify no pre-existing damage (FI-POL-001)."
-        )
+        emit("FC-04", "flag",
+             f"NEW POLICY SYNDROME — LOW RISK: Policy is {age_days} days old at incident "
+             f"(threshold: {NPS_MEDIUM_DAYS + 1}–{NPS_LOW_DAYS} days). Minor elevated risk; "
+             f"verify no pre-existing damage (FI-POL-001).")
+    else:
+        emit("FC-04", "pass", f"Policy is {age_days} days old at incident — outside the new-policy risk window.")
 
-    # ── Flag 4: Late reporting ────────────────────────────────────────────────
-    created_at = claim.get("created_at", "")
-    incident_date = claim.get("incident_date", "")
+    # ── FC-05: Late reporting ──────────────────────────────────────────────────
     if created_at and incident_date:
         try:
             inc = datetime.strptime(incident_date[:10], "%Y-%m-%d").date()
             filed = datetime.strptime(created_at[:10], "%Y-%m-%d").date()
             delay = (filed - inc).days
             if delay > 7:
-                flags.append(f"Claim filed {delay} days after incident — late reporting (FI-CLM-003)")
+                emit("FC-05", "flag", f"Claim filed {delay} days after incident — late reporting (FI-CLM-003)")
             elif delay > 3:
-                flags.append(f"Claim filed {delay} days after incident — borderline late reporting")
+                emit("FC-05", "flag", f"Claim filed {delay} days after incident — borderline late reporting")
+            else:
+                emit("FC-05", "pass", f"Claim filed {max(delay, 0)} day(s) after incident — timely reporting.")
         except Exception:
-            pass
+            emit("FC-05", "na", "Incident / filing dates not parseable.")
+    else:
+        emit("FC-05", "na", "Filing or incident date unavailable.")
 
-    # ── Flag 5: Night-time incident (22:00–05:00) ─────────────────────────────
-    incident_dt_str = claim.get("incident_date", "")
-    if incident_dt_str and ("T" in incident_dt_str or " " in incident_dt_str):
+    # ── FC-06: Night-time incident (22:00–05:00) ───────────────────────────────
+    if incident_date and ("T" in incident_date or " " in incident_date):
         try:
-            clean = incident_dt_str.replace("T", " ")
-            time_part = clean.split(" ")[1][:5]   # "23:30"
+            time_part = incident_date.replace("T", " ").split(" ")[1][:5]   # "23:30"
             hour = int(time_part.split(":")[0])
             if hour >= 22 or hour < 5:
-                flags.append(
-                    f"Incident at {time_part} — night-time claim (22:00–05:00 high-risk window; "
-                    f"reduced CCTV coverage, no witnesses likely)"
-                )
+                emit("FC-06", "flag",
+                     f"Incident at {time_part} — night-time claim (22:00–05:00 high-risk window; "
+                     f"reduced CCTV coverage, no witnesses likely)")
+            else:
+                emit("FC-06", "pass", f"Daytime incident ({time_part}).")
         except Exception:
-            pass
+            emit("FC-06", "na", "Incident time not parseable.")
+    else:
+        emit("FC-06", "na", "Incident time of day not provided.")
 
-    # ── Flag 6: Suspicious language in description ────────────────────────────
-    desc_lower = claim.get("description", "").lower()
+    # ── FC-07: Suspicious language in description ──────────────────────────────
     suspicious = [
         ("no witnesses",     "No witnesses mentioned — unverifiable incident (FI-LOC-001)"),
         ("no witness",       "No witnesses mentioned — unverifiable incident (FI-LOC-001)"),
@@ -181,225 +240,306 @@ def _rule_based_flags(claim: dict, damage: dict, docs: dict | None = None) -> li
         ("nobody around",    "No bystanders claimed — no independent corroboration possible"),
         ("parked",           "Vehicle was parked/unattended — no driver witness to impact"),
     ]
-    for phrase, label in suspicious:
-        if phrase in desc_lower:
-            flags.append(label)
-            break   # one language flag is enough; avoid over-counting
+    if not desc_lower.strip():
+        emit("FC-07", "na", "No description provided.")
+    else:
+        matched = next((label for phrase, label in suspicious if phrase in desc_lower), None)
+        if matched:
+            emit("FC-07", "flag", matched)
+        else:
+            emit("FC-07", "pass", "No high-risk language patterns in the description.")
 
-    # ── Flag 7: Same location as a prior claim on this policy ─────────────────
-    current_loc_words = set(claim.get("incident_location", "").lower().split())
-    for prev in same_policy:
-        prev_loc_words = set(prev.get("incident_location", "").lower().split())
-        overlap = current_loc_words & prev_loc_words
-        # 3+ common location words = same/nearby location
-        if len(overlap) >= 3:
-            flags.append(
-                f"Incident location overlaps with prior claim {prev.get('claim_id')} "
-                f"— repeat-location fraud pattern (FI-LOC-002)"
-            )
-            break
-
-    # ── Flag 8: Multiple claims within 30 days ────────────────────────────────
-    try:
-        incident_d = datetime.strptime(incident_date[:10], "%Y-%m-%d").date()
-        recent = []
-        for c in same_policy:
-            try:
-                prev_d = datetime.strptime(c.get("incident_date", "2000-01-01")[:10], "%Y-%m-%d").date()
-                if abs((prev_d - incident_d).days) <= 30:
-                    recent.append(c)
-            except Exception:
-                pass
-        if recent:
-            flags.append(
-                f"{len(recent)} prior claim(s) on this policy within 30 days of this incident "
-                f"— high-frequency pattern (FI-CLM-002)"
-            )
-    except Exception:
-        pass
-
-    # ── Flag 9: Near-duplicate description (duplicate submission) ─────────────
-    curr_words = set(desc_lower.split())
-    if len(curr_words) > 5:
+    # ── FC-08: Same location as a prior claim on this policy ───────────────────
+    if not same_policy:
+        emit("FC-08", "na", "No prior claims to compare location against.")
+    else:
+        current_loc_words = set((claim.get("incident_location") or "").lower().split())
+        hit = None
         for prev in same_policy:
-            prev_desc = prev.get("description", "").lower()
-            prev_words = set(prev_desc.split())
+            prev_loc_words = set((prev.get("incident_location") or "").lower().split())
+            if len(current_loc_words & prev_loc_words) >= 3:
+                hit = prev
+                break
+        if hit:
+            emit("FC-08", "flag",
+                 f"Incident location overlaps with prior claim {hit.get('claim_id')} "
+                 f"— repeat-location fraud pattern (FI-LOC-002)")
+        else:
+            emit("FC-08", "pass", "Incident location does not overlap any prior claim on this policy.")
+
+    # ── FC-09: Multiple claims within 30 days ──────────────────────────────────
+    if not same_policy:
+        emit("FC-09", "na", "No prior claims to compare timing against.")
+    else:
+        try:
+            incident_d = datetime.strptime(incident_date[:10], "%Y-%m-%d").date()
+            recent = []
+            for c in same_policy:
+                try:
+                    prev_d = datetime.strptime(c.get("incident_date", "2000-01-01")[:10], "%Y-%m-%d").date()
+                    if abs((prev_d - incident_d).days) <= 30:
+                        recent.append(c)
+                except Exception:
+                    pass
+            if recent:
+                emit("FC-09", "flag",
+                     f"{len(recent)} prior claim(s) on this policy within 30 days of this incident "
+                     f"— high-frequency pattern (FI-CLM-002)")
+            else:
+                emit("FC-09", "pass", "No other claims on this policy within 30 days of the incident.")
+        except Exception:
+            emit("FC-09", "na", "Incident date not parseable.")
+
+    # ── FC-10: Near-duplicate description (duplicate submission) ───────────────
+    curr_words = set(desc_lower.split())
+    if not same_policy or len(curr_words) <= 5:
+        emit("FC-10", "na", "Not enough prior claims / description text to compare.")
+    else:
+        hit_ratio = None
+        hit_id = None
+        for prev in same_policy:
+            prev_words = set((prev.get("description") or "").lower().split())
             if len(prev_words) > 5:
-                overlap_ratio = len(curr_words & prev_words) / max(len(curr_words), len(prev_words))
-                if overlap_ratio >= 0.70:
-                    flags.append(
-                        f"CRITICAL: Description is {int(overlap_ratio*100)}% identical to prior claim "
-                        f"{prev.get('claim_id')} — likely duplicate submission fraud"
-                    )
+                ratio = len(curr_words & prev_words) / max(len(curr_words), len(prev_words))
+                if ratio >= 0.70:
+                    hit_ratio, hit_id = ratio, prev.get("claim_id")
                     break
+        if hit_ratio is not None:
+            emit("FC-10", "flag",
+                 f"CRITICAL: Description is {int(hit_ratio*100)}% identical to prior claim "
+                 f"{hit_id} — likely duplicate submission fraud")
+        else:
+            emit("FC-10", "pass", "Description is not a near-duplicate of any prior claim.")
 
-    # ── Flag 10: Claim amount as % of sum insured ─────────────────────────────
+    # ── FC-11: Claim amount as % of sum insured ────────────────────────────────
     try:
-        policy = storage.get_policy_by_phone(claim.get("phone", ""))
-        if policy:
-            sum_insured = float(policy.get("sum_insured", 0))
-            amount = float(claim.get("claim_amount", 0))
-            if sum_insured > 0 and amount > 0:
-                pct = (amount / sum_insured) * 100
-                if pct >= 75:
-                    flags.append(
-                        f"Claim amount ₹{amount:,.0f} is {pct:.0f}% of sum insured ₹{sum_insured:,.0f} "
-                        f"— near total-loss; inflation or constructive total loss risk"
-                    )
-                elif pct >= 50:
-                    flags.append(
-                        f"Claim amount is {pct:.0f}% of sum insured — high-value claim requiring enhanced scrutiny"
-                    )
-    except Exception:
-        pass
+        sum_insured = float(policy.get("sum_insured", 0)) if policy else 0.0
+        amount = float(claim.get("claim_amount") or 0)
+        if sum_insured > 0 and amount > 0:
+            pct = (amount / sum_insured) * 100
+            if pct >= 75:
+                emit("FC-11", "flag",
+                     f"Claim amount ₹{amount:,.0f} is {pct:.0f}% of sum insured ₹{sum_insured:,.0f} "
+                     f"— near total-loss; inflation or constructive total loss risk")
+            elif pct >= 50:
+                emit("FC-11", "flag",
+                     f"Claim amount is {pct:.0f}% of sum insured — high-value claim requiring enhanced scrutiny")
+            else:
+                emit("FC-11", "pass", f"Claim amount is {pct:.0f}% of sum insured — within normal range.")
+        else:
+            emit("FC-11", "na", "Sum insured or claim amount unavailable.")
+    except (ValueError, TypeError):
+        emit("FC-11", "na", "Sum insured or claim amount not parseable.")
 
-    # ── Flags 11–14: Visual fraud signals from Agent 1 ────────────────────────
-    if damage:
-        # No visible damage at all, yet a claim was filed — claiming on an
-        # undamaged vehicle, wrong/old photos, or pre-incident images. Only raise
-        # when photos were actually submitted (otherwise it's a documentation gap,
-        # handled by the image-quality gate, not a fraud signal).
-        photos_present = bool(storage.get_claim_images(claim.get("claim_id", "")))
+    # ── FC-12–16: Image-based visual fraud signals ─────────────────────────────
+    if not photos_present:
+        for cid in ("FC-12", "FC-13", "FC-14", "FC-15", "FC-16"):
+            emit(cid, "na", "No photos submitted (documentation gap handled by image-quality gate).")
+    else:
+        # FC-12: No visible damage despite a claim being filed
         no_damage = damage.get("damage_present") is False or (
             isinstance(damage.get("damaged_parts"), list)
             and len(damage.get("damaged_parts")) == 0
             and damage.get("total_repair_estimate", {}).get("max", 0) in (0, None)
         )
-        if photos_present and no_damage:
-            flags.append(
-                "No visible damage detected in the submitted photos despite a claim being filed "
-                "— vehicle appears undamaged; possible invalid claim, wrong/old photos, or "
-                "pre-incident images (FI-DMG-002: Physics Mismatch)"
-            )
+        if no_damage:
+            emit("FC-12", "flag",
+                 "No visible damage detected in the submitted photos despite a claim being filed "
+                 "— vehicle appears undamaged; possible invalid claim, wrong/old photos, or "
+                 "pre-incident images (FI-DMG-002: Physics Mismatch)")
+        else:
+            emit("FC-12", "pass", "Visible damage detected in the submitted photos.")
 
+        # FC-13: Vehicle identity match
         match = damage.get("vehicle_match_in_image")
         if match == "No":
             seen = damage.get("vehicle_seen_description", "unknown vehicle")
-            flags.append(
-                f"CRITICAL: Vehicle in images ({seen}) does NOT match registered vehicle "
-                f"— possible vehicle substitution fraud (FI-DMG-004)"
-            )
+            emit("FC-13", "flag",
+                 f"CRITICAL: Vehicle in images ({seen}) does NOT match registered vehicle "
+                 f"— possible vehicle substitution fraud (FI-DMG-004)")
         elif match == "Unclear":
-            flags.append(
-                "Vehicle identity in images is unclear — make/model/plate not verifiable "
-                "(FI-DMG-004)"
-            )
+            emit("FC-13", "flag",
+                 "Vehicle identity in images is unclear — make/model/plate not verifiable (FI-DMG-004)")
+        elif match == "Yes":
+            emit("FC-13", "pass", "Vehicle in images matches the registered vehicle.")
+        else:
+            emit("FC-13", "na", "No image-based vehicle identity check available.")
 
+        # FC-14: Pre-existing damage
         if damage.get("pre_existing_damage_observed"):
             notes = damage.get("pre_existing_damage_notes") or "details not specified"
-            flags.append(
-                f"Pre-existing damage observed in images ({notes}) — "
-                f"old damage may be claimed as new incident (FI-DMG-001)"
-            )
+            emit("FC-14", "flag",
+                 f"Pre-existing damage observed in images ({notes}) — "
+                 f"old damage may be claimed as new incident (FI-DMG-001)")
+        else:
+            emit("FC-14", "pass", "No pre-existing damage observed in the submitted images.")
 
+        # FC-15: Registration plate verification
         plate_visible = damage.get("registration_plate_visible")
+        plate_seen = damage.get("plate_text_in_image", "")
         if plate_visible is False:
-            flags.append(
-                "Registration plate not visible in any submitted image — "
-                "vehicle identity unverifiable (FI-DMG-003)"
-            )
-        elif plate_visible and damage.get("plate_text_in_image"):
-            # Cross-check plate against policy vehicle field
+            emit("FC-15", "flag",
+                 "Registration plate not visible in any submitted image — vehicle identity unverifiable (FI-DMG-003)")
+        elif plate_visible and plate_seen:
             policy_vehicle = claim.get("vehicle", "")
-            plate_seen = damage.get("plate_text_in_image", "")
-            if plate_seen and plate_seen.upper().replace(" ", "") not in policy_vehicle.upper().replace(" ", ""):
-                flags.append(
-                    f"Plate visible in image ({plate_seen}) may not match policy vehicle "
-                    f"({policy_vehicle}) — verify registration"
-                )
+            if plate_seen.upper().replace(" ", "") not in policy_vehicle.upper().replace(" ", ""):
+                emit("FC-15", "flag",
+                     f"Plate visible in image ({plate_seen}) may not match policy vehicle "
+                     f"({policy_vehicle}) — verify registration")
+            else:
+                emit("FC-15", "pass", f"Registration plate visible ({plate_seen}) and consistent with policy vehicle.")
+        elif plate_visible:
+            emit("FC-15", "pass", "Registration plate visible in submitted images.")
+        else:
+            emit("FC-15", "na", "Plate visibility not assessed.")
 
+        # FC-16: Multiple vehicles in frame
         if damage.get("multiple_vehicles_in_frame"):
-            flags.append(
-                "Multiple vehicles visible in claim images — "
-                "possible staged collision scenario (FS-002)"
-            )
+            emit("FC-16", "flag",
+                 "Multiple vehicles visible in claim images — possible staged collision scenario (FS-002)")
+        else:
+            emit("FC-16", "pass", "Single vehicle in frame — no staged-collision indicator.")
 
-    # ── Document-based fraud checks ───────────────────────────────────────────
-    docs = docs or {}
-
-    # Flag 15: Workshop inflation (from Agent 1 cross-check)
-    if damage.get("garage_inflation_flag"):
-        variance = damage.get("garage_vs_ai_variance_pct", 0) or 0
-        garage_amt = damage.get("garage_estimate_amount_inr", 0) or 0
-        flags.append(
-            f"FI-INF-001: Workshop Inflation — Garage estimate ₹{garage_amt:,.0f} is "
-            f"{abs(variance):.0f}% above AI estimate (FS-004: Workshop Inflation Conspiracy)"
-        )
-    elif damage.get("garage_estimate_provided") and damage.get("garage_vs_ai_variance_pct") is not None:
-        variance = damage.get("garage_vs_ai_variance_pct", 0) or 0
-        garage_amt = damage.get("garage_estimate_amount_inr", 0) or 0
-        if variance < -35:
-            flags.append(
-                f"Garage estimate ₹{garage_amt:,.0f} is {abs(variance):.0f}% below AI estimate "
-                f"— suspicious underdeclaration (possible cash settlement bypass)"
-            )
+    # ── FC-17 / FC-23: Garage-vs-AI variance (inflation / under-declaration) ───
+    garage_provided = damage.get("garage_estimate_provided")
+    variance = damage.get("garage_vs_ai_variance_pct")
+    garage_amt = damage.get("garage_estimate_amount_inr", 0) or 0
+    if garage_provided and variance is not None:
+        if damage.get("garage_inflation_flag"):
+            emit("FC-17", "flag",
+                 f"FI-INF-001: Workshop Inflation — Garage estimate ₹{garage_amt:,.0f} is "
+                 f"{abs(variance):.0f}% above AI estimate (FS-004: Workshop Inflation Conspiracy)")
         elif variance > 25:
-            # Above the normal estimate range but below the hard 40% inflation line:
-            # not conclusive on its own — surface for surveyor line-item review.
-            flags.append(
-                f"Garage estimate ₹{garage_amt:,.0f} is {variance:.0f}% above the assessed "
-                f"fair value — elevated estimate; verify line items (may or may not be fraud)"
-            )
+            emit("FC-17", "flag",
+                 f"Garage estimate ₹{garage_amt:,.0f} is {variance:.0f}% above the assessed "
+                 f"fair value — elevated estimate; verify line items (may or may not be fraud)")
+        else:
+            emit("FC-17", "pass",
+                 f"Garage estimate ₹{garage_amt:,.0f} is within fair-value range of the AI estimate "
+                 f"(variance {variance:+.0f}%).")
 
-    # Flag 16: No FIR for theft or third-party claim
-    claim_type = claim.get("claim_type", "").lower()
-    if "theft" in claim_type or "third party" in claim_type:
-        if not docs.get("fir"):
-            flags.append(
-                f"No FIR uploaded for '{claim.get('claim_type')}' claim — "
-                f"FIR is mandatory for theft and third-party incidents (FI-CLM-003)"
-            )
+        if variance < -35:
+            emit("FC-23", "flag",
+                 f"Garage estimate ₹{garage_amt:,.0f} is {abs(variance):.0f}% below AI estimate "
+                 f"— suspicious underdeclaration (possible cash settlement bypass)")
+        else:
+            emit("FC-23", "pass", "Garage estimate is not suspiciously below the AI assessment.")
+    else:
+        emit("FC-17", "na", "No garage estimate to compare against the AI assessment.")
+        emit("FC-23", "na", "No garage estimate to compare against the AI assessment.")
 
-    # Flag 17: Garage estimate submitted but no damage photos
-    claim_id = claim.get("claim_id", "")
-    if docs.get("estimate") and claim_id and not storage.get_claim_images(claim_id):
-        flags.append(
-            "Garage estimate uploaded but no damage photos provided — "
-            "possible prior-damage claim or cash settlement bypass"
-        )
+    # ── FC-18: FIR present for theft / third-party ─────────────────────────────
+    if not (is_theft or is_tp):
+        emit("FC-18", "na", "Not a theft / third-party claim — FIR not mandatory.")
+    elif not docs.get("fir"):
+        emit("FC-18", "flag",
+             f"No FIR uploaded for '{claim.get('claim_type')}' claim — "
+             f"FIR is mandatory for theft and third-party incidents (FI-CLM-003)")
+    else:
+        emit("FC-18", "pass", "FIR uploaded for theft / third-party claim.")
 
-    # Flags 18–21: FIR cross-checks
+    # ── FC-19: Garage estimate uploaded but no damage photos ───────────────────
+    if not docs.get("estimate"):
+        emit("FC-19", "na", "No garage estimate document uploaded.")
+    elif not photos_present:
+        emit("FC-19", "flag",
+             "Garage estimate uploaded but no damage photos provided — "
+             "possible prior-damage claim or cash settlement bypass")
+    else:
+        emit("FC-19", "pass", "Garage estimate uploaded alongside damage photos.")
+
+    # ── FC-20: FIR consistency cross-check ─────────────────────────────────────
     parsed_fir = docs.get("fir")
-    if parsed_fir and parsed_fir.get("parsed_ok"):
+    if not (parsed_fir and parsed_fir.get("parsed_ok")):
+        emit("FC-20", "na", "No parseable FIR to cross-check.")
+    else:
+        mismatches: list[str] = []
         # Date mismatch
         fir_date = (parsed_fir.get("incident_date_in_fir") or "")[:10]
         claim_date = (claim.get("incident_date") or "")[:10]
         if fir_date and claim_date:
             try:
-                fir_d = datetime.strptime(fir_date, "%Y-%m-%d").date()
-                claim_d = datetime.strptime(claim_date, "%Y-%m-%d").date()
-                diff = abs((fir_d - claim_d).days)
+                diff = abs((datetime.strptime(fir_date, "%Y-%m-%d").date()
+                            - datetime.strptime(claim_date, "%Y-%m-%d").date()).days)
                 if diff > 2:
-                    flags.append(
-                        f"FI-LOC-001: FIR incident date ({fir_date}) differs from "
-                        f"claim incident date ({claim_date}) by {diff} days — story inconsistency"
-                    )
+                    mismatches.append(f"FIR date ({fir_date}) differs from claim date ({claim_date}) by {diff} days")
             except Exception:
                 pass
-
         # Location mismatch
         fir_loc = (parsed_fir.get("incident_location_in_fir") or "").lower()
         claim_loc = (claim.get("incident_location") or "").lower()
         if fir_loc and claim_loc:
-            stopwords: set[str] = {"the", "a", "an", "and", "in", "of", "at", "on", "road", "street", "near"}
+            stopwords = {"the", "a", "an", "and", "in", "of", "at", "on", "road", "street", "near"}
             fir_words = set(fir_loc.split()) - stopwords
             claim_words = set(claim_loc.split()) - stopwords
             if fir_words and claim_words and not fir_words & claim_words:
-                flags.append(
-                    f"FI-LOC-001: FIR incident location '{parsed_fir.get('incident_location_in_fir')}' "
-                    f"does not match claimed location '{claim.get('incident_location')}' — story inconsistency"
-                )
-
+                mismatches.append(
+                    f"FIR location '{parsed_fir.get('incident_location_in_fir')}' "
+                    f"does not match claimed location '{claim.get('incident_location')}'")
         # Vehicle registration mismatch
         fir_reg = (parsed_fir.get("vehicle_reg_in_fir") or "").upper().replace(" ", "").replace("-", "")
         policy_vehicle = (claim.get("vehicle") or "").upper().replace(" ", "").replace("-", "")
         if fir_reg and fir_reg not in policy_vehicle:
-            flags.append(
-                f"FIR mentions vehicle reg '{parsed_fir.get('vehicle_reg_in_fir')}' which does not "
-                f"match policy vehicle — possible vehicle identity fraud"
-            )
+            mismatches.append(
+                f"FIR vehicle reg '{parsed_fir.get('vehicle_reg_in_fir')}' does not match policy vehicle")
+        if mismatches:
+            emit("FC-20", "flag", "FI-LOC-001: FIR mismatch — " + "; ".join(mismatches) + " — story inconsistency")
+        else:
+            emit("FC-20", "pass", "FIR date, location and vehicle registration are consistent with the claim.")
 
-    return flags
+    # ── FC-21 / FC-22: Telematics/IoT cross-checks ─────────────────────────────
+    telematics = docs.get("telematics")
+    if not (telematics and telematics.get("parsed_ok")):
+        emit("FC-21", "na", "No telematics data available.")
+        emit("FC-22", "na", "No telematics data available.")
+    else:
+        # FC-21: impact corroboration
+        if is_theft:
+            emit("FC-21", "na", "Theft claim — collision telematics not applicable.")
+        elif telematics.get("impact_g_force") is None:
+            emit("FC-21", "na", "Telematics lacks impact-force data.")
+        elif telematics.get("hard_braking_detected") is False and telematics["impact_g_force"] < 1.0:
+            emit("FC-21", "flag",
+                 f"Telematics shows no hard-braking or impact event (impact "
+                 f"{telematics['impact_g_force']}g) despite a claimed collision — physics mismatch (FI-DMG-002 style)")
+        else:
+            emit("FC-21", "pass", "Telematics impact signature is consistent with a collision.")
+
+        # FC-22: GPS location
+        if not telematics.get("gps_trail"):
+            emit("FC-22", "na", "No GPS trail in telematics.")
+        else:
+            try:
+                from agents.context_verification import _geocode, _check_gps_trail
+                geo = _geocode(claim.get("incident_location", ""))
+                gps_check = _check_gps_trail(telematics, geo)
+                match = gps_check["gps_location_match"]
+                if match is False:
+                    emit("FC-22", "flag",
+                         f"CRITICAL: Telematics GPS trail is {gps_check['gps_distance_km']}km from "
+                         f"the claimed incident location — vehicle was not where the claim says it was")
+                elif match is True:
+                    emit("FC-22", "pass", "Telematics GPS trail matches the claimed incident location.")
+                else:
+                    # match is None — claimed location could not be geocoded, so the
+                    # trail can't be verified either way. Not a pass.
+                    emit("FC-22", "na", "Claimed location could not be geocoded — GPS trail not verified.")
+            except Exception:
+                emit("FC-22", "na", "GPS trail could not be verified against the claimed location.")
+
+    # ── FC-24: Cross-claim garage inflation (FS-004) ───────────────────────────
+    try:
+        from services.garage_intel import cross_claim_inflation
+        gc = cross_claim_inflation(claim)
+        emit("FC-24", gc["status"], gc["detail"])
+    except Exception:
+        emit("FC-24", "na", "Cross-claim garage history unavailable.")
+
+    # Return in FC order, defaulting any unexpectedly-missing check to na
+    return [
+        results.get(cid, {"id": cid, "name": name, "status": "na", "detail": "Not evaluated."})
+        for cid, name in FRAUD_CHECK_NAMES.items()
+    ]
 
 
 class FraudIntelligenceAgent(BaseAgent):
@@ -407,7 +547,8 @@ class FraudIntelligenceAgent(BaseAgent):
         claim = context["claim"]
         damage = context["agents"].get("damage_assessment", {})
         docs = context.get("docs", {})
-        flags = _rule_based_flags(claim, damage, docs)
+        checks = _run_fraud_checks(claim, damage, docs)
+        flags = [c["detail"] for c in checks if c["status"] == "flag"]
 
         # Build policy age hint for RAG query
         age_days = _policy_age_days(claim)
@@ -417,7 +558,7 @@ class FraudIntelligenceAgent(BaseAgent):
         description = claim.get("description", "")
         kb_context = get_fraud_kb_context(description, age_hint)
 
-        claim_details = "\n".join(f"{k}: {v}" for k, v in claim.items())
+        claim_details = "\n".join(f"{k}: {v}" for k, v in build_llm_safe_claim(claim).items())
         damage_str = str(damage)
         flags_str = "\n".join(f"- {f}" for f in flags) if flags else "None"
 
@@ -453,7 +594,7 @@ class FraudIntelligenceAgent(BaseAgent):
                 base_score += 8
         base_score = min(base_score, 95)
 
-        result = ask_json(prompt)
+        result = ask_json(prompt, agent_name="fraud_intelligence", claim_id=claim.get("claim_id"))
         result.setdefault("status", "completed")
 
         # Clamp the LLM score to base ± 15 to keep it reproducible
@@ -493,5 +634,22 @@ class FraudIntelligenceAgent(BaseAgent):
                 if "NEW POLICY SYNDROME" not in ind.upper()
                 and "NEW POLICY" not in ind.upper()
             ]
+
+        # Expose the full 24-check list for the UI Fraud Check List panel.
+        result["fraud_checks"] = checks
+        flagged = sum(1 for c in checks if c["status"] == "flag")
+        passed  = sum(1 for c in checks if c["status"] == "pass")
+        na      = sum(1 for c in checks if c["status"] == "na")
+        result["fraud_check_counts"] = {"flagged": flagged, "passed": passed, "na": na}
+
+        # Regenerate the summary from the Python-authoritative score and label so
+        # the collapsed agent row never shows a stale LLM-generated figure. Pick
+        # the most significant deterministic flag as the headline (CRITICAL first).
+        top_flag = next((f for f in flags if "CRITICAL" in f.upper()), flags[0] if flags else None)
+        result["summary"] = (
+            f"Fraud Risk: {clamped}% ({result['fraud_label']}) | "
+            f"{flagged} of {len(checks)} checks flagged"
+            + (f" | Top: {top_flag}" if top_flag else " | No deterministic flags raised")
+        )
 
         return result

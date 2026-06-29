@@ -2,7 +2,7 @@ from typing import Any
 
 import storage
 from agents.base_agent import BaseAgent
-from services.gemini_client import ask_json
+from services.llm_client import ask_json
 from services.rag_client import get_similar_cases_context
 
 BASE_PROMPT = """You are an accident reconstruction expert with access to a database of historical claim cases.
@@ -15,10 +15,16 @@ Claim description: {description}
 Vehicle: {vehicle}
 Claim type: {claim_type}
 Damage map (from Agent 1): {damage_map}
+Telematics/IoT sensor data (if provided): {telematics_summary}
+{image_note}
 
 Instructions:
 - The damage map shows parts damaged and their severity from the AI damage assessment
 - Historical precedents (if provided above) show how similar damage patterns were classified
+- If telematics data is provided, ground your reconstruction in it — e.g. a claimed high-speed
+  collision with no hard-braking/impact reading is a red flag worth noting in inconsistencies
+- If dashcam frames are provided, they are in CHRONOLOGICAL ORDER — use the sequence to reason
+  about causality (what happened first, point of impact, aftermath), not just independent angles
 - Assess whether the physical damage pattern is consistent with the described incident
 - For reconstruction_bullets: distil the reconstruction narrative into exactly 3 concise, specific bullet points
 - For storyboard_panels: produce exactly 4 sequential panels covering the lifecycle of the incident.
@@ -53,11 +59,35 @@ Return a JSON object with exactly these fields:
 """
 
 
+def _telematics_summary(telematics: dict | None) -> str:
+    if not telematics or not telematics.get("parsed_ok"):
+        return "Not provided"
+    parts = []
+    if telematics.get("speed_kmph_at_event") is not None:
+        parts.append(f"speed {telematics['speed_kmph_at_event']} km/h at event")
+    if telematics.get("hard_braking_detected") is not None:
+        parts.append(f"hard braking: {telematics['hard_braking_detected']}")
+    if telematics.get("impact_g_force") is not None:
+        parts.append(f"impact {telematics['impact_g_force']}g")
+    if telematics.get("airbag_deployed") is not None:
+        parts.append(f"airbag deployed: {telematics['airbag_deployed']}")
+    return "; ".join(parts) if parts else "GPS trail only, no sensor readings"
+
+
 class IncidentReconstructionAgent(BaseAgent):
     def run(self, context: dict[str, Any]) -> dict[str, Any]:
         claim = context["claim"]
         damage = context["agents"].get("damage_assessment", {})
-        image_paths = storage.get_claim_images(claim["claim_id"])
+        damage_images = storage.get_claim_images(claim["claim_id"])
+
+        # Dashcam frames (chronological stills extracted from uploaded video)
+        # supplement or substitute for static damage photos.
+        dashcam_frames = (context.get("docs") or {}).get("dashcam_frames") or []
+        image_paths = damage_images + dashcam_frames
+        image_note = (
+            f"({len(damage_images)} damage photo(s) followed by {len(dashcam_frames)} "
+            f"chronological dashcam frame(s))" if dashcam_frames else ""
+        )
 
         damage_map = [
             {"part": p.get("part"), "severity": p.get("severity")}
@@ -69,13 +99,18 @@ class IncidentReconstructionAgent(BaseAgent):
         claim_type = claim.get("claim_type", "")
         kb_context = get_similar_cases_context(claim_type, damaged_part_names)
 
+        telematics = (context.get("docs") or {}).get("telematics")
+
         prompt = BASE_PROMPT.format(
             kb_context=kb_context,
             description=claim.get("description", ""),
             vehicle=claim.get("vehicle", ""),
             claim_type=claim_type,
             damage_map=str(damage_map),
+            telematics_summary=_telematics_summary(telematics),
+            image_note=image_note,
         )
-        result = ask_json(prompt, image_paths if image_paths else None)
+        result = ask_json(prompt, image_paths if image_paths else None,
+                          agent_name="incident_reconstruction", claim_id=claim["claim_id"])
         result.setdefault("status", "completed")
         return result

@@ -1,7 +1,8 @@
 from typing import Any
 
 from agents.base_agent import BaseAgent
-from services.gemini_client import ask_json
+from services.llm_client import ask_json
+from services.pii import build_llm_safe_claim
 from services.rag_client import get_settlement_context
 
 BASE_PROMPT = """You are a senior motor insurance claims adjudicator with access to historical precedents
@@ -119,7 +120,7 @@ class SettlementRecommendationAgent(BaseAgent):
         ])
 
         claim_summary = "\n".join(
-            f"{k}: {v}" for k, v in claim.items()
+            f"{k}: {v}" for k, v in build_llm_safe_claim(claim).items()
             if k not in ("description",)  # description already in damage/fraud context
         )
 
@@ -131,6 +132,6 @@ class SettlementRecommendationAgent(BaseAgent):
             reconstruction=recon_summary,
             context=ctx_summary,
         )
-        result = ask_json(prompt)
+        result = ask_json(prompt, agent_name="settlement_recommendation", claim_id=claim.get("claim_id"))
         result.setdefault("status", "completed")
         return result

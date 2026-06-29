@@ -1,4 +1,5 @@
 from datetime import datetime
+from math import asin, cos, radians, sin, sqrt
 from typing import Any
 
 import httpx
@@ -11,8 +12,20 @@ from services.rag_client import get_policy_context
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 OWM_URL = "https://api.openweathermap.org/data/2.5/weather"
 
+# Per-process geocode cache. The Fraud agent (A2, GPS cross-check) and Context
+# Verification (A4) both geocode the same incident location during one
+# investigation; caching avoids the duplicate Nominatim call and keeps us under
+# its ~1 req/s limit. Keyed by the normalized location string.
+_GEOCODE_CACHE: dict[str, dict | None] = {}
+
 
 def _geocode(location: str) -> dict | None:
+    key = (location or "").strip().lower()
+    if key in _GEOCODE_CACHE:
+        # Return a copy so callers can never mutate the shared cached entry.
+        cached = _GEOCODE_CACHE[key]
+        return dict(cached) if cached else None
+    result: dict | None = None
     try:
         r = httpx.get(
             NOMINATIM_URL,
@@ -22,14 +35,18 @@ def _geocode(location: str) -> dict | None:
         )
         data = r.json()
         if data:
-            return {
+            result = {
                 "lat": float(data[0]["lat"]),
                 "lon": float(data[0]["lon"]),
                 "display": data[0]["display_name"],
             }
     except Exception:
-        pass
-    return None
+        result = None
+    # Only cache successful lookups — a transient network failure shouldn't
+    # poison the location as permanently ungeocodable for the rest of the run.
+    if result is not None:
+        _GEOCODE_CACHE[key] = result
+    return dict(result) if result else None
 
 
 def _get_weather(lat: float, lon: float) -> str:
@@ -82,6 +99,40 @@ def _check_policy_validity(claim: dict) -> str | None:
         return None
 
 
+_GPS_MISMATCH_THRESHOLD_KM = 2.0
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371.0  # Earth radius, km
+    dlat, dlon = radians(lat2 - lat1), radians(lon2 - lon1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    return 2 * r * asin(sqrt(a))
+
+
+def _check_gps_trail(telematics: dict | None, geocoded: dict | None) -> dict:
+    """Cross-check a telematics GPS trail against the geocoded claimed
+    incident location. Soft signal — both data sources can be imprecise, so
+    this only flags a mismatch beyond a generous threshold, not exact equality.
+    """
+    trail = (telematics or {}).get("gps_trail") or []
+    if not trail:
+        return {"gps_trail_available": False, "gps_location_match": None, "gps_distance_km": None}
+    if not geocoded:
+        return {"gps_trail_available": True, "gps_location_match": None, "gps_distance_km": None}
+
+    # Nearest point in the trail to the claimed location — the trail may span
+    # the approach to the incident, not just the impact point itself.
+    nearest_km = min(
+        _haversine_km(geocoded["lat"], geocoded["lon"], p["lat"], p["lon"])
+        for p in trail if "lat" in p and "lon" in p
+    )
+    return {
+        "gps_trail_available": True,
+        "gps_location_match": nearest_km <= _GPS_MISMATCH_THRESHOLD_KM,
+        "gps_distance_km": round(nearest_km, 2),
+    }
+
+
 def _assess_policy_coverage(policy_context: str, claim_type: str) -> str:
     """Simple keyword check against policy context to flag coverage issues."""
     if not policy_context:
@@ -130,6 +181,10 @@ class ContextVerificationAgent(BaseAgent):
         if geo:
             weather = _get_weather(geo["lat"], geo["lon"])
 
+        # Telematics GPS trail cross-check (optional evidence)
+        telematics = (context.get("docs") or {}).get("telematics")
+        gps_check = _check_gps_trail(telematics, geo)
+
         # Policy context summary (trimmed for output)
         policy_summary = ""
         if policy_ctx:
@@ -143,6 +198,9 @@ class ContextVerificationAgent(BaseAgent):
             "geocoded_location": geo.get("display", location) if geo else location,
             "coordinates": {"lat": geo["lat"], "lon": geo["lon"]} if geo else None,
             "weather": weather,
+            "gps_trail_available": gps_check["gps_trail_available"],
+            "gps_location_match": gps_check["gps_location_match"],
+            "gps_distance_km": gps_check["gps_distance_km"],
             "policy_coverage_note": coverage_note,
             "policy_document_excerpt": policy_summary or "Policy document not indexed — run scripts/build_vectorstore.py",
             "summary": (

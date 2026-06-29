@@ -1,11 +1,23 @@
 import csv
+import io
 import json
 import os
 import threading
 from datetime import datetime
 from typing import Optional
 
+from PIL import Image
+
 from config import CLAIMS_CSV, CLAIMS_DIR, DATA_DIR, POLICIES_CSV
+from services.crypto import decrypt_field, encrypt_field
+
+# CSV columns holding PII — encrypted at rest, decrypted transparently on read.
+_PII_FIELDS = ("claimant", "phone")
+
+# Groq's vision API rejects requests over ~4MB; base64 inflates raw bytes by
+# ~33%, so cap the on-disk image well below that to leave room for the prompt.
+_MAX_IMAGE_BYTES = 2 * 1024 * 1024
+_MAX_IMAGE_DIM = 1600
 
 # File-level lock — prevents concurrent investigations clobbering the same CSV row.
 _csv_lock = threading.Lock()
@@ -38,7 +50,12 @@ def _ensure_csv():
 def get_all_claims() -> list[dict]:
     _ensure_csv()
     with open(CLAIMS_CSV, "r", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+        rows = list(csv.DictReader(f))
+    for row in rows:
+        for field in _PII_FIELDS:
+            if field in row:
+                row[field] = decrypt_field(row[field])
+    return rows
 
 
 def get_claim(claim_id: str) -> Optional[dict]:
@@ -48,23 +65,35 @@ def get_claim(claim_id: str) -> Optional[dict]:
     return None
 
 
+def _encrypt_pii_row(row: dict) -> dict:
+    row = dict(row)
+    for field in _PII_FIELDS:
+        if row.get(field):
+            row[field] = encrypt_field(row[field])
+    return row
+
+
 def save_claim(claim_data: dict):
-    _ensure_csv()
-    with open(CLAIMS_CSV, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
-        writer.writerow({k: claim_data.get(k, "") for k in CSV_FIELDS})
+    # Hold the same lock as update_claim_field so a concurrent append and
+    # full-file rewrite can never interleave and corrupt the CSV.
+    with _csv_lock:
+        _ensure_csv()
+        row = _encrypt_pii_row({k: claim_data.get(k, "") for k in CSV_FIELDS})
+        with open(CLAIMS_CSV, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+            writer.writerow(row)
 
 
 def update_claim_field(claim_id: str, field: str, value: str):
     with _csv_lock:
-        claims = get_all_claims()
+        claims = get_all_claims()  # PII fields come back decrypted here
         for c in claims:
             if c["claim_id"] == claim_id:
                 c[field] = value
         with open(CLAIMS_CSV, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
             writer.writeheader()
-            writer.writerows(claims)
+            writer.writerows(_encrypt_pii_row(c) for c in claims)
 
 
 # ── Policy helpers ────────────────────────────────────────────────────────────
@@ -171,7 +200,38 @@ def delete_claim_image(claim_id: str, filename: str) -> bool:
     return False
 
 
+def _downscale_image(content: bytes, filename: str) -> tuple[bytes, str]:
+    """Resize/recompress an oversized photo so it stays under the vision API's
+    request-size limit. A 9MB photo caused Groq 413 "Request Entity Too Large"
+    errors on Damage Assessment and Incident Reconstruction in testing —
+    base64 encoding inflates raw bytes by ~33% before they're sent to Groq.
+    Returns (content, filename) unchanged if already small enough or not a
+    decodable image (e.g. a non-image file slipped into the images folder).
+    """
+    if len(content) <= _MAX_IMAGE_BYTES:
+        return content, filename
+    try:
+        img = Image.open(io.BytesIO(content)).convert("RGB")
+        w, h = img.size
+        scale = min(1.0, _MAX_IMAGE_DIM / max(w, h))
+        if scale < 1.0:
+            img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))))
+        data = content
+        for quality in (85, 70, 55, 40):
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality)
+            data = buf.getvalue()
+            if len(data) <= _MAX_IMAGE_BYTES:
+                break
+        base, _ = os.path.splitext(filename)
+        return data, f"{base}.jpg"
+    except Exception:
+        return content, filename
+
+
 def save_uploaded_file(claim_id: str, filename: str, content: bytes, file_type: str = "images") -> str:
+    if file_type == "images":
+        content, filename = _downscale_image(content, filename)
     dest_dir = os.path.join(_claim_dir(claim_id), file_type)
     os.makedirs(dest_dir, exist_ok=True)
     dest_path = os.path.join(dest_dir, filename)
@@ -185,10 +245,11 @@ def get_docs_dir(claim_id: str) -> str:
 
 
 def get_claim_docs(claim_id: str) -> dict:
-    """Return uploaded non-image document paths: {"estimate": [...], "fir": [...]}"""
+    """Return uploaded non-image document paths, keyed by doc_type
+    (estimate/fir PDFs, dashcam video, telematics JSON/CSV)."""
     base = get_docs_dir(claim_id)
     result: dict = {}
-    for doc_type in ("estimate", "fir"):
+    for doc_type in ("estimate", "fir", "dashcam", "telematics"):
         d = os.path.join(base, doc_type)
         if os.path.isdir(d):
             result[doc_type] = [
